@@ -1,0 +1,11 @@
+#ifndef FUTUREPIA_HARDFORK_0_1
+#define FUTUREPIA_HARDFORK_0_1 1
+#define FUTUREPIA_HARDFORK_0_1_TIME 1522644600
+#define FUTUREPIA_HARDFORK_0_1_VERSION hardfork_version( 0, 1 )
+
+#define FUTUREPIA_HF_1_NUM_POSTS     (0)
+#define FUTUREPIA_HF_1_NUM_REPLIES   (0)
+
+#define FUTUREPIA_HF_1_RECENT_CLAIMS (fc::uint128_t(uint64_t(0ull)))
+
+#endif
