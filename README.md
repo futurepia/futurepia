@@ -36,19 +36,13 @@ sudo apt-get install -y \
         libreadline-dev \
         perl
 
-git clone https://github.com/futurepia/futurepia
-
-git submodule update --init --recursive
-
-mkdir build
-
-cd build
-
-cmake -DCMAKE_BUILD_TYPE=Release ..
-
-make -j$(nproc) futurepiad
-
-make -j$(nproc) cli_wallet
+$>git clone https://github.com/futurepia/futurepia
+$>git submodule update --init --recursive
+$>mkdir build
+$>cd build
+$>cmake -DCMAKE_BUILD_TYPE=Release ..
+$>make -j$(nproc) futurepiad
+$>make -j$(nproc) cli_wallet
 
 
 
