@@ -44,3 +44,5 @@ cmake -DCMAKE_BUILD_TYPE=Release ..
 make -j$(nproc) futurepiad
 make -j$(nproc) cli_wallet
 
+
+
