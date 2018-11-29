@@ -37,11 +37,17 @@ sudo apt-get install -y \
         perl
 
 $>git clone https://github.com/futurepia/futurepia
+
 $>git submodule update --init --recursive
+
 $>mkdir build
+
 $>cd build
+
 $>cmake -DCMAKE_BUILD_TYPE=Release ..
+
 $>make -j$(nproc) futurepiad
+
 $>make -j$(nproc) cli_wallet
 
 
