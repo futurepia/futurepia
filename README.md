@@ -127,7 +127,7 @@ If command prompt is locked, other commands can not be used.
 When executing commands such as create / update etc, the active private key of BP / BO is needed, so the key is included in the wallet.
 
 ```
-      import_key [BP / BO's active private key]
+      import_key [private key]
       unlocked >>> import_key 5Jt2PbJHF9zswdhnypctCDoJ1uufApC2dX6H8JiQsKkjjCiwSAv
 ```
 
