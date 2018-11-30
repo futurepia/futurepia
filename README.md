@@ -2,6 +2,7 @@
 For Ubuntu 16.04 users, after installing the right packages with `apt` Futurepia
 will build out of the box without further effort:
 
+```
 sudo apt-get install -y \  
         autoconf \  
         automake \  
@@ -14,7 +15,9 @@ sudo apt-get install -y \
         pkg-config \  
         python3 \  
         python3-jinja2
-          
+```
+
+```
 sudo apt-get install -y \  
         libboost-chrono-dev \  
         libboost-context-dev \  
@@ -29,12 +32,15 @@ sudo apt-get install -y \
         libboost-system-dev \  
         libboost-test-dev \  
         libboost-thread-dev  
-        
+```
+
+```
 sudo apt-get install -y \  
         doxygen \  
         libncurses5-dev \  
         libreadline-dev \  
         perl  
+```
 
 $>git clone https://github.com/futurepia/futurepia
 
