@@ -1,7 +1,5 @@
 # Building Futurepia
-For Ubuntu 16.04 users, after installing the right packages with `apt` Futurepia
-will build out of the box without further effort:
-
+## For Ubuntu 16.04
 ```
 sudo apt-get install -y \  
         autoconf \  
@@ -52,6 +50,50 @@ make -j$(nproc) futurepiad
 make -j$(nproc) cli_wallet
 ```
 
+## For Windows
+ Cross compile from Linux to Windows using cygwin
+
+1. Install cygwin 
+- Install packages i.e devel, perl, util, debug 
+
+2. After running cygwin, install apt-cyg
+```
+wget raw.github.com/transcode-open/apt-cyg/master/apt-cyg
+```
+
+3. Install other programs (optional)
+```
+apt-cyg install bzip2 gzip m4 make unzip zip
+```
+
+4. Installl the python jinja2 module
+
+5. Adding a cygwin installation path to window environment variable 
+- Add CYWIN_HOME from System Properties -> Environment variables to C:\cygwin64  
+- Add %CYGWIN_HOME%\bin to PATH
+
+6. Boost Library 1.58.0 version build
+
+7. OpenSSL build
+
+8. Futurepia build
+
+ 8.1 Setup build environment (inside build folder)
+ ```
+ ../programs/build_helpers/configure_build.py --openssl-dir=/usr/x86_64-w64-mingw32 --boost-dir=/usr/local --sys-root=/usr/bin -f -r --win
+```
+
+testnet
+```
+ ../programs/build_helpers/configure_build.py --openssl-dir=/usr/x86_64-w64-mingw32 --boost-dir=/usr/local --sys-root=/usr/bin -f -r --win --test
+ ```
+
+ 8.2 build
+ ```
+ make -j6 futurepiad
+ make -j6 cli_wallet
+ ```
+ 
 # H/W requirements.
 ```
 HDD free space 54G or more
