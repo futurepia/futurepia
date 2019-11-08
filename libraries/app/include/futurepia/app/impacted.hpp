@@ -28,18 +28,39 @@
 #include <futurepia/protocol/transaction.hpp>
 #include <futurepia/chain/futurepia_object_types.hpp>
 
+#include <futurepia/token/token_operations.hpp>
+#include <futurepia/dapp/dapp_operations.hpp>
+#include <futurepia/private_message/private_message_operations.hpp>
+#include <futurepia/bobserver/bobserver_operations.hpp>
+
 #include <fc/string.hpp>
 
 namespace futurepia { namespace app {
 
 using namespace fc;
+using namespace futurepia::token;
+using namespace futurepia::dapp;
+using namespace futurepia::private_message;
+using namespace futurepia::bobserver;
+
+template< typename OPERATION_TYPE, typename VISITOR >
+void process_inner_operation( const fc::variant var, VISITOR visitor );
+
+template< typename OPERATION_TYPE, typename VISITOR >
+void process_inner_operation( vector< char > data, VISITOR visitor );
+
+void get_impacted_account_from_custom( const custom_json_hf2_operation& op, fc::flat_set< protocol::account_name_type >& result );
+void get_impacted_account_from_custom( const custom_json_operation& op, fc::flat_set< protocol::account_name_type >& result );
+void get_impacted_account_from_custom( const custom_binary_operation& op, fc::flat_set< protocol::account_name_type >& result );
 
 void operation_get_impacted_accounts(
    const futurepia::protocol::operation& op,
+   chain::database& db,
    fc::flat_set<protocol::account_name_type>& result );
 
 void transaction_get_impacted_accounts(
    const futurepia::protocol::transaction& tx,
+   chain::database& db,
    fc::flat_set<protocol::account_name_type>& result
    );
 

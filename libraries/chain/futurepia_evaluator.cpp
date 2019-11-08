@@ -32,6 +32,28 @@ std::string wstring_to_utf8(const std::wstring& str)
 
 namespace futurepia { namespace chain {
    using fc::uint128_t;
+   using protocol::comment_vote_type;
+   using protocol::comment_betting_type;
+
+inline void validate_permlink_0_1( const string& permlink )
+{
+   FC_ASSERT( permlink.size() > FUTUREPIA_MIN_PERMLINK_LENGTH && permlink.size() < FUTUREPIA_MAX_PERMLINK_LENGTH, "Permlink is not a valid size." );
+
+   for( auto c : permlink )
+   {
+      switch( c )
+      {
+         case 'a': case 'b': case 'c': case 'd': case 'e': case 'f': case 'g': case 'h': case 'i':
+         case 'j': case 'k': case 'l': case 'm': case 'n': case 'o': case 'p': case 'q': case 'r':
+         case 's': case 't': case 'u': case 'v': case 'w': case 'x': case 'y': case 'z': case '0':
+         case '1': case '2': case '3': case '4': case '5': case '6': case '7': case '8': case '9':
+         case '-':
+            break;
+         default:
+            FC_ASSERT( false, "Invalid permlink character: ${s}", ("s", std::string() + c ) );
+      }
+   }
+}
 
 struct strcmp_equal
 {
@@ -41,35 +63,35 @@ struct strcmp_equal
    }
 };
 
+void bobserver_update_evaluator::do_apply( const bobserver_update_operation& o )
+{
+   _db.get_account( o.owner ); // verify owner exists
+   FC_ASSERT( o.url.size() <= FUTUREPIA_MAX_BOBSERVER_URL_LENGTH, "URL is too long" );
+   const auto& by_bobserver_name_idx = _db.get_index< bobserver_index >().indices().get< by_name >();
+   auto bo_itr = by_bobserver_name_idx.find( o.owner );
+   if( bo_itr != by_bobserver_name_idx.end() )
+   {
+      _db.modify( *bo_itr, [&]( bobserver_object& bo ) {
+         from_string( bo.url, o.url );
+         bo.signing_key        = o.block_signing_key;
+         bo.is_excepted        = false;
+      });
+   }
+   else
+   {
+      _db.create< bobserver_object >( [&]( bobserver_object& bo ) {
+         bo.account            = o.owner;
+         from_string( bo.url, o.url );
+         bo.signing_key        = o.block_signing_key;
+         bo.created            = _db.head_block_time();
+         bo.is_excepted        = false;
+      });
+   }
+}
+
 void account_create_evaluator::do_apply( const account_create_operation& o )
 {
-   const auto& creator = _db.get_account( o.creator );
-
    const auto& props = _db.get_dynamic_global_properties();
-
-   asset fee = o.fee;
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      if(fee.decimals() == 3) 
-      {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         if(fee.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            fee.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            fee.change_fraction_size(asset(0, FPCH_SYMBOL).decimals());
-         }
-      }
-   }
-
-   FC_ASSERT( creator.balance >= fee, "Insufficient balance to create account.", ( "creator.balance", creator.balance )( "required", fee ) );
-
-   const bobserver_schedule_object& wso = _db.get_bobserver_schedule_object();
-   FC_ASSERT( fee >= asset( wso.median_props.account_creation_fee.amount * FUTUREPIA_CREATE_ACCOUNT_WITH_FUTUREPIA_MODIFIER, FUTUREPIA_SYMBOL ), "Insufficient Fee: ${f} required, ${p} provided.",
-              ("f", wso.median_props.account_creation_fee * asset( FUTUREPIA_CREATE_ACCOUNT_WITH_FUTUREPIA_MODIFIER, FUTUREPIA_SYMBOL ) )
-              ("p", fee) );
 
    for( auto& a : o.owner.account_auths )
    {
@@ -86,11 +108,6 @@ void account_create_evaluator::do_apply( const account_create_operation& o )
       _db.get_account( a.first );
    }
 
-
-   _db.modify( creator, [&]( account_object& c ){
-      c.balance -= fee;
-   });
-
    _db.create< account_object >( [&]( account_object& acc )
    {
       acc.name = o.new_account_name;
@@ -99,10 +116,9 @@ void account_create_evaluator::do_apply( const account_create_operation& o )
       acc.last_vote_time = props.time;
       acc.mined = false;
       acc.recovery_account = o.creator;
-
-      #ifndef IS_LOW_MEM
-         from_string( acc.json_metadata, o.json_metadata );
-      #endif
+#ifndef IS_LOW_MEM
+      from_string( acc.json_metadata, o.json_metadata );
+#endif
    });
 
    _db.create< account_authority_object >( [&]( account_authority_object& auth )
@@ -115,98 +131,6 @@ void account_create_evaluator::do_apply( const account_create_operation& o )
    });
 
 }
-
-void account_create_with_delegation_evaluator::do_apply( const account_create_with_delegation_operation& o )
-{
-   FC_ASSERT( true, "Account creation with delegation is not enabled until hardfork 17" );
-
-   const auto& creator = _db.get_account( o.creator );
-   const auto& props = _db.get_dynamic_global_properties();
-   const bobserver_schedule_object& wso = _db.get_bobserver_schedule_object();
-
-   asset fee = o.fee;
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      if(fee.decimals() == 3) 
-      {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         if(fee.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            fee.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            fee.change_fraction_size(asset(0, FPCH_SYMBOL).decimals());
-         }
-      }
-   }
-
-   FC_ASSERT( creator.balance >= fee, "Insufficient balance to create account.",
-               ( "creator.balance", creator.balance )
-               ( "required", fee ) );
-
-
-   auto target_delegation = asset( wso.median_props.account_creation_fee.amount * FUTUREPIA_CREATE_ACCOUNT_WITH_FUTUREPIA_MODIFIER * FUTUREPIA_CREATE_ACCOUNT_DELEGATION_RATIO, FUTUREPIA_SYMBOL );
-
-   auto current_delegation = asset( fee.amount * FUTUREPIA_CREATE_ACCOUNT_DELEGATION_RATIO, FUTUREPIA_SYMBOL ) + o.delegation;
-
-   FC_ASSERT( current_delegation >= target_delegation, "Inssufficient Delegation ${f} required, ${p} provided.",
-               ("f", target_delegation )
-               ( "p", current_delegation )
-               ( "account_creation_fee", wso.median_props.account_creation_fee )
-               ( "o.fee", fee )
-               ( "o.delegation", o.delegation ) );
-
-   FC_ASSERT( fee >= wso.median_props.account_creation_fee, "Insufficient Fee: ${f} required, ${p} provided.",
-               ("f", wso.median_props.account_creation_fee)
-               ("p", fee) );
-
-   for( auto& a : o.owner.account_auths )
-   {
-      _db.get_account( a.first );
-   }
-
-   for( auto& a : o.active.account_auths )
-   {
-      _db.get_account( a.first );
-   }
-
-   for( auto& a : o.posting.account_auths )
-   {
-      _db.get_account( a.first );
-   }
-
-   _db.modify( creator, [&]( account_object& c )
-   {
-      c.balance -= fee;
-   });
-
-   _db.create< account_object >( [&]( account_object& acc )
-   {
-      acc.name = o.new_account_name;
-      acc.memo_key = o.memo_key;
-      acc.created = props.time;
-      acc.last_vote_time = props.time;
-      acc.mined = false;
-
-      acc.recovery_account = o.creator;
-
-      #ifndef IS_LOW_MEM
-         from_string( acc.json_metadata, o.json_metadata );
-      #endif
-   });
-
-   _db.create< account_authority_object >( [&]( account_authority_object& auth )
-   {
-      auth.account = o.new_account_name;
-      auth.owner = o.owner;
-      auth.active = o.active;
-      auth.posting = o.posting;
-      auth.last_owner_update = fc::time_point_sec::min();
-   });
-
-}
-
 
 void account_update_evaluator::do_apply( const account_update_operation& o )
 {
@@ -220,10 +144,6 @@ void account_update_evaluator::do_apply( const account_update_operation& o )
 
    if( o.owner )
    {
-#ifndef IS_TEST_NET
-      FC_ASSERT( _db.head_block_time() - account_auth.last_owner_update > FUTUREPIA_OWNER_UPDATE_LIMIT, "Owner authority can only be updated once an hour." );
-#endif
-
       for( auto a: o.owner->account_auths )
       {
          _db.get_account( a.first );
@@ -253,18 +173,12 @@ void account_update_evaluator::do_apply( const account_update_operation& o )
       if( o.memo_key != public_key_type() )
             acc.memo_key = o.memo_key;
 
-      if( ( o.active || o.owner ) && acc.active_challenged )
-      {
-         acc.active_challenged = false;
-         acc.last_active_proved = _db.head_block_time();
-      }
-
       acc.last_account_update = _db.head_block_time();
 
-      #ifndef IS_LOW_MEM
-        if ( o.json_metadata.size() > 0 )
-            from_string( acc.json_metadata, o.json_metadata );
-      #endif
+#ifndef IS_LOW_MEM
+      if ( o.json_metadata.size() > 0 )
+         from_string( acc.json_metadata, o.json_metadata );
+#endif
    });
 
    if( o.active || o.posting )
@@ -278,268 +192,442 @@ void account_update_evaluator::do_apply( const account_update_operation& o )
 
 }
 
-
-void escrow_transfer_evaluator::do_apply( const escrow_transfer_operation& o )
+void delete_comment_evaluator::do_apply( const delete_comment_operation& o )
 {
-   try
-   {
-      asset fpch_amount = o.fpch_amount;
-      asset futurepia_amount = o.futurepia_amount;
-      asset fee = o.fee;
-      if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-      {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         asset fpch_sym = asset(0, FPCH_SYMBOL);
+   const auto& comment = _db.get_comment( o.author, o.permlink );
+   FC_ASSERT( comment.children == 0, "Cannot delete a comment with replies." );
 
-         if(fpch_amount.decimals() == 3) 
-         {
-            fpch_amount.change_fraction_size(fpch_sym.decimals());
-         }
-
-         if(futurepia_amount.decimals() == 3) 
-         {
-            futurepia_amount.change_fraction_size(fpc_sym.decimals());
-         }
-
-         if(fee.decimals() == 3) 
-         {
-            if(fee.symbol_name() == fpc_sym.symbol_name()) 
-            {
-               fee.change_fraction_size(fpc_sym.decimals());
-            } 
-            else 
-            {
-               fee.change_fraction_size(fpch_sym.decimals());
-            }
-         }
-      }
-
-      const auto& from_account = _db.get_account(o.from);
-      _db.get_account(o.to);
-      _db.get_account(o.agent);
-
-      FC_ASSERT( o.ratification_deadline > _db.head_block_time(), "The escorw ratification deadline must be after head block time." );
-      FC_ASSERT( o.escrow_expiration > _db.head_block_time(), "The escrow expiration must be after head block time." );
-
-      asset futurepia_spent = futurepia_amount;
-      asset fpch_spent = fpch_amount;
-      if( fee.symbol == FUTUREPIA_SYMBOL )
-         futurepia_spent += fee;
-      else
-         fpch_spent += fee;
-
-      FC_ASSERT( from_account.balance >= futurepia_spent, "Account cannot cover FPC costs of escrow. Required: ${r} Available: ${a}", ("r",futurepia_spent)("a",from_account.balance) );
-      FC_ASSERT( from_account.fpch_balance >= fpch_spent, "Account cannot cover FPCH costs of escrow. Required: ${r} Available: ${a}", ("r",fpch_spent)("a",from_account.fpch_balance) );
-
-      _db.adjust_balance( from_account, -futurepia_spent );
-      _db.adjust_balance( from_account, -fpch_spent );
-
-      _db.create<escrow_object>([&]( escrow_object& esc )
-      {
-         esc.escrow_id              = o.escrow_id;
-         esc.from                   = o.from;
-         esc.to                     = o.to;
-         esc.agent                  = o.agent;
-         esc.ratification_deadline  = o.ratification_deadline;
-         esc.escrow_expiration      = o.escrow_expiration;
-         esc.fpch_balance            = fpch_amount;
-         esc.futurepia_balance          = futurepia_amount;
-         esc.pending_fee            = o.fee;
-      });
+   const auto& vote_idx = _db.get_index<comment_vote_index>().indices().get<by_comment_voter>();
+   auto vote_itr = vote_idx.lower_bound( comment.id );
+   while( vote_itr != vote_idx.end() && vote_itr->comment == comment.id ) {
+      const auto& cur_vote = *vote_itr;
+      ++vote_itr;
+      _db.remove( cur_vote );
    }
-   FC_CAPTURE_AND_RETHROW( (o) )
+
+   const auto& betting_idx = _db.get_index< comment_betting_index >().indices().get< by_betting_comment >();
+   auto betting_itr = betting_idx.lower_bound( comment.id );
+   while( betting_itr != betting_idx.end() && betting_itr->comment == comment.id ) {
+      const auto& betting = *betting_itr;
+      ++betting_itr;
+      _db.remove( betting );
+   }
+
+   // const auto& betting_state_idx = _db.get_index< comment_betting_state_index >().indices().get< by_betting_state_comment >();
+   // auto betting_state_itr = betting_state_idx.lower_bound( comment.id );
+   // while( betting_state_itr != betting_state_idx.end() && betting_state_itr->comment == comment.id ) {
+   //    const auto& betting_state = *betting_state_itr;
+   //    ++betting_state_itr;
+   //    _db.remove( betting_state );
+   // }
+
+   /// this loop can be skiped for validate-only nodes as it is merely gathering stats for indicies
+   if( comment.parent_author != FUTUREPIA_ROOT_POST_PARENT )
+   {
+      auto parent = &_db.get_comment( comment.parent_author, comment.parent_permlink );
+      auto now = _db.head_block_time();
+      while( parent )
+      {
+         _db.modify( *parent, [&]( comment_object& p ){
+            p.children--;
+            p.active = now;
+         });
+#ifndef IS_LOW_MEM
+         if( parent->parent_author != FUTUREPIA_ROOT_POST_PARENT )
+            parent = &_db.get_comment( parent->parent_author, parent->parent_permlink );
+         else
+#endif
+            parent = nullptr;
+      }
+   }
+
+   _db.remove( comment );
 }
 
-void escrow_approve_evaluator::do_apply( const escrow_approve_operation& o )
+void comment_betting_state_evaluator::do_apply( const comment_betting_state_operation& o )
 {
-   try
+   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2))
    {
+      FC_ASSERT( false, "comment_betting_state_operation do not use it anymore." );
+   }
 
-      const auto& escrow = _db.get_escrow( o.from, o.escrow_id );
+   try{
+      const auto& comment = _db.get_comment( o.author, o.permlink );
 
-      FC_ASSERT( escrow.to == o.to, "Operation 'to' (${o}) does not match escrow 'to' (${e}).", ("o", o.to)("e", escrow.to) );
-      FC_ASSERT( escrow.agent == o.agent, "Operation 'agent' (${a}) does not match escrow 'agent' (${e}).", ("o", o.agent)("e", escrow.agent) );
-      FC_ASSERT( escrow.ratification_deadline >= _db.head_block_time(), "The escrow ratification deadline has passed. Escrow can no longer be ratified." );
+      FC_ASSERT( comment.group_id == 0, "Only a main feed can do betting.");
 
-      bool reject_escrow = !o.approve;
+      const auto& betting_state_idx = _db.get_index< comment_betting_state_index >().indices().get< by_betting_state_comment >();
+      auto itr = betting_state_idx.find( boost::make_tuple( comment.id, o.round_no ) );
 
-      if( o.who == o.to )
+      if(itr == betting_state_idx.end() )
       {
-         FC_ASSERT( !escrow.to_approved, "Account 'to' (${t}) has already approved the escrow.", ("t", o.to) );
-
-         if( !reject_escrow )
+         _db.create< comment_betting_state_object >( [&]( comment_betting_state_object& object )
          {
-            _db.modify( escrow, [&]( escrow_object& esc )
-            {
-               esc.to_approved = true;
-            });
-         }
-      }
-      if( o.who == o.agent )
+            object.comment = comment.id;
+            object.round_no = o.round_no;
+            object.allow_betting = o.allow_betting;
+         });
+      } 
+      else
       {
-         FC_ASSERT( !escrow.agent_approved, "Account 'agent' (${a}) has already approved the escrow.", ("a", o.agent) );
-
-         if( !reject_escrow )
+         _db.modify( *itr, [&]( comment_betting_state_object& object )
          {
-            _db.modify( escrow, [&]( escrow_object& esc )
-            {
-               esc.agent_approved = true;
-            });
-         }
-      }
-
-      if( reject_escrow )
-      {
-         const auto& from_account = _db.get_account( o.from );
-         _db.adjust_balance( from_account, escrow.futurepia_balance );
-         _db.adjust_balance( from_account, escrow.fpch_balance );
-         _db.adjust_balance( from_account, escrow.pending_fee );
-
-         _db.remove( escrow );
-      }
-      else if( escrow.to_approved && escrow.agent_approved )
-      {
-         const auto& agent_account = _db.get_account( o.agent );
-         _db.adjust_balance( agent_account, escrow.pending_fee );
-
-         _db.modify( escrow, [&]( escrow_object& esc )
-         {
-            esc.pending_fee.amount = 0;
+            object.allow_betting = o.allow_betting;
          });
       }
-   }
-   FC_CAPTURE_AND_RETHROW( (o) )
+
+   } FC_CAPTURE_AND_RETHROW( (o) )
 }
 
-void escrow_dispute_evaluator::do_apply( const escrow_dispute_operation& o )
-{
-   try
+void comment_evaluator::do_apply( const comment_operation& o )
+{ try {
+   FC_ASSERT( o.title.size() + o.body.size() + o.json_metadata.size(), "Cannot update comment because nothing appears to be changing." );
+
+   const auto& by_permlink_idx = _db.get_index< comment_index >().indices().get< by_permlink >();
+   auto itr = by_permlink_idx.find( boost::make_tuple( o.author, o.permlink ) );
+
+   const auto& auth = _db.get_account( o.author ); /// prove it exists
+
+   comment_id_type id;
+
+   const comment_object* parent = nullptr;
+   if( o.parent_author != FUTUREPIA_ROOT_POST_PARENT )
    {
-      _db.get_account( o.from ); // Verify from account exists
-
-      const auto& e = _db.get_escrow( o.from, o.escrow_id );
-      FC_ASSERT( _db.head_block_time() < e.escrow_expiration, "Disputing the escrow must happen before expiration." );
-      FC_ASSERT( e.to_approved && e.agent_approved, "The escrow must be approved by all parties before a dispute can be raised." );
-      FC_ASSERT( !e.disputed, "The escrow is already under dispute." );
-      FC_ASSERT( e.to == o.to, "Operation 'to' (${o}) does not match escrow 'to' (${e}).", ("o", o.to)("e", e.to) );
-      FC_ASSERT( e.agent == o.agent, "Operation 'agent' (${a}) does not match escrow 'agent' (${e}).", ("o", o.agent)("e", e.agent) );
-
-      _db.modify( e, [&]( escrow_object& esc )
-      {
-         esc.disputed = true;
-      });
+      parent = &_db.get_comment( o.parent_author, o.parent_permlink );
+      FC_ASSERT( parent->depth < FUTUREPIA_MAX_COMMENT_DEPTH, "Comment is nested ${x} posts deep, maximum depth is ${y}.", ("x",parent->depth)("y",FUTUREPIA_MAX_COMMENT_DEPTH) );
    }
-   FC_CAPTURE_AND_RETHROW( (o) )
-}
 
-void escrow_release_evaluator::do_apply( const escrow_release_operation& o )
-{
-   try
+   if( o.json_metadata.size() )
+      FC_ASSERT( fc::is_utf8( o.json_metadata ), "JSON Metadata must be UTF-8" );
+
+   auto now = _db.head_block_time();
+
+   if ( itr == by_permlink_idx.end() )
    {
-      asset fpch_amount = o.fpch_amount;
-      asset futurepia_amount = o.futurepia_amount;
-      
-      if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
+      if( o.parent_author != FUTUREPIA_ROOT_POST_PARENT )
       {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         asset fpch_sym = asset(0, FPCH_SYMBOL);
-
-         if(o.fpch_amount.decimals() == 3) {
-            fpch_amount.change_fraction_size(fpch_sym.decimals());
-         }
-
-         if(o.futurepia_amount.decimals() == 3) {
-            futurepia_amount.change_fraction_size(fpc_sym.decimals());
-         }
+         FC_ASSERT( _db.get( parent->root_comment ).allow_replies, "The parent comment has disabled replies." );
       }
 
-      _db.get_account(o.from); // Verify from account exists
-      const auto& receiver_account = _db.get_account(o.receiver);
-
-      const auto& e = _db.get_escrow( o.from, o.escrow_id );
-      FC_ASSERT( e.futurepia_balance >= futurepia_amount, "Release amount exceeds escrow balance. Amount: ${a}, Balance: ${b}", ("a", futurepia_amount)("b", e.futurepia_balance) );
-      FC_ASSERT( e.fpch_balance >= fpch_amount, "Release amount exceeds escrow balance. Amount: ${a}, Balance: ${b}", ("a", fpch_amount)("b", e.fpch_balance) );
-      FC_ASSERT( e.to == o.to, "Operation 'to' (${o}) does not match escrow 'to' (${e}).", ("o", o.to)("e", e.to) );
-      FC_ASSERT( e.agent == o.agent, "Operation 'agent' (${a}) does not match escrow 'agent' (${e}).", ("o", o.agent)("e", e.agent) );
-      FC_ASSERT( o.receiver == e.from || o.receiver == e.to, "Funds must be released to 'from' (${f}) or 'to' (${t})", ("f", e.from)("t", e.to) );
-      FC_ASSERT( e.to_approved && e.agent_approved, "Funds cannot be released prior to escrow approval." );
-
-      // If there is a dispute regardless of expiration, the agent can release funds to either party
-      if( e.disputed )
-      {
-         FC_ASSERT( o.who == e.agent, "Only 'agent' (${a}) can release funds in a disputed escrow.", ("a", e.agent) );
-      }
+      if( o.parent_author == FUTUREPIA_ROOT_POST_PARENT )
+          FC_ASSERT( ( now - auth.last_root_post ) > FUTUREPIA_MIN_ROOT_COMMENT_INTERVAL, "You may only post once every 5 minutes.", ("now",now)("last_root_post", auth.last_root_post) );
       else
-      {
-         FC_ASSERT( o.who == e.from || o.who == e.to, "Only 'from' (${f}) and 'to' (${t}) can release funds from a non-disputed escrow", ("f", e.from)("t", e.to) );
+          FC_ASSERT( (now - auth.last_post) > FUTUREPIA_MIN_REPLY_INTERVAL, "You may only comment once every 20 seconds.", ("now",now)("auth.last_post",auth.last_post) );
 
-         if( e.escrow_expiration > _db.head_block_time() )
+      uint64_t post_bandwidth = auth.post_bandwidth;
+
+      _db.modify( auth, [&]( account_object& a ) {
+         if( o.parent_author == FUTUREPIA_ROOT_POST_PARENT )
          {
-            // If there is no dispute and escrow has not expired, either party can release funds to the other.
-            if( o.who == e.from )
-            {
-               FC_ASSERT( o.receiver == e.to, "Only 'from' (${f}) can release funds to 'to' (${t}).", ("f", e.from)("t", e.to) );
-            }
-            else if( o.who == e.to )
-            {
-               FC_ASSERT( o.receiver == e.from, "Only 'to' (${t}) can release funds to 'from' (${t}).", ("f", e.from)("t", e.to) );
-            }
+            a.last_root_post = now;
+            a.post_bandwidth = uint32_t( post_bandwidth );
          }
-      }
-      // If escrow expires and there is no dispute, either party can release funds to either party.
-
-      _db.adjust_balance( receiver_account, futurepia_amount );
-      _db.adjust_balance( receiver_account, fpch_amount );
-
-      _db.modify( e, [&]( escrow_object& esc )
-      {
-         esc.futurepia_balance -= futurepia_amount;
-         esc.fpch_balance -= fpch_amount;
+         a.last_post = now;
+         a.post_count++;
       });
 
-      if( e.futurepia_balance.amount == 0 && e.fpch_balance.amount == 0 )
+      const auto& new_comment = _db.create< comment_object >( [&]( comment_object& com )
       {
-         _db.remove( e );
+         com.author = o.author;
+         from_string( com.permlink, o.permlink );
+         com.group_id = o.group_id;
+         com.last_update = _db.head_block_time();
+         com.created = com.last_update;
+         com.active = com.last_update;
+ 
+         if ( o.parent_author == FUTUREPIA_ROOT_POST_PARENT )
+         {
+            com.parent_author = "";
+            from_string( com.parent_permlink, o.parent_permlink );
+            from_string( com.category, o.parent_permlink );
+            com.root_comment = com.id;
+         }
+         else
+         {
+            com.parent_author = parent->author;
+            com.parent_permlink = parent->permlink;
+            com.depth = parent->depth + 1;
+            com.category = parent->category;
+            com.root_comment = parent->root_comment;
+         }
+
+#ifndef IS_LOW_MEM
+            from_string( com.title, o.title );
+            if( o.body.size() < 1024*1024*128 )
+            {
+               from_string( com.body, o.body );
+            }
+            if( fc::is_utf8( o.json_metadata ) )
+               from_string( com.json_metadata, o.json_metadata );
+            else
+               wlog( "Comment ${a}/${p} contains invalid UTF-8 metadata", ("a", o.author)("p", o.permlink) );
+#endif
+      });
+
+      id = new_comment.id;
+
+/// this loop can be skiped for validate-only nodes as it is merely gathering stats for indicies
+      auto now = _db.head_block_time();
+      while( parent ) {
+         _db.modify( *parent, [&]( comment_object& p ){
+            p.children++;
+            p.active = now;
+         });
+#ifndef IS_LOW_MEM
+         if( parent->parent_author != FUTUREPIA_ROOT_POST_PARENT )
+            parent = &_db.get_comment( parent->parent_author, parent->parent_permlink );
+         else
+#endif
+            parent = nullptr;
       }
+
    }
-   FC_CAPTURE_AND_RETHROW( (o) )
-}
+   else // start edit case
+   {
+      const auto& comment = *itr;
+
+      _db.modify( comment, [&]( comment_object& com )
+      {
+         com.last_update   = _db.head_block_time();
+         com.active        = com.last_update;
+         strcmp_equal equal;
+
+         if( !parent )
+         {
+            FC_ASSERT( com.parent_author == account_name_type(), "The parent of a comment cannot change." );
+            FC_ASSERT( equal( com.parent_permlink, o.parent_permlink ), "The permlink of a comment cannot change." );
+         }
+         else
+         {
+            FC_ASSERT( com.parent_author == o.parent_author, "The parent of a comment cannot change." );
+            FC_ASSERT( equal( com.parent_permlink, o.parent_permlink ), "The permlink of a comment cannot change." );
+         }
+
+#ifndef IS_LOW_MEM
+           if( o.title.size() )         from_string( com.title, o.title );
+           if( o.json_metadata.size() )
+           {
+              if( fc::is_utf8( o.json_metadata ) )
+                 from_string( com.json_metadata, o.json_metadata );
+              else
+                 wlog( "Comment ${a}/${p} contains invalid UTF-8 metadata", ("a", o.author)("p", o.permlink) );
+           }
+
+           if( o.body.size() ) {
+              try {
+               diff_match_patch<std::wstring> dmp;
+               auto patch = dmp.patch_fromText( utf8_to_wstring(o.body) );
+               if( patch.size() ) {
+                  auto result = dmp.patch_apply( patch, utf8_to_wstring( to_string( com.body ) ) );
+                  auto patched_body = wstring_to_utf8(result.first);
+                  if( !fc::is_utf8( patched_body ) ) {
+                     idump(("invalid utf8")(patched_body));
+                     from_string( com.body, fc::prune_invalid_utf8(patched_body) );
+                  } else { from_string( com.body, patched_body ); }
+               }
+               else { // replace
+                  from_string( com.body, o.body );
+               }
+              } catch ( ... ) {
+                  from_string( com.body, o.body );
+              }
+           }
+#endif
+      });
+
+   } // end EDIT case
+
+} FC_CAPTURE_AND_RETHROW( (o) ) }
 
 void transfer_evaluator::do_apply( const transfer_operation& o )
 {
    const auto& from_account = _db.get_account(o.from);
    const auto& to_account = _db.get_account(o.to);
 
-   if( from_account.active_challenged )
-   {
-      _db.modify( from_account, [&]( account_object& a )
-      {
-         a.active_challenged = false;
-         a.last_active_proved = _db.head_block_time();
-      });
-   }
-
    asset amount = o.amount;
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      if(o.amount.decimals() == 3) {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         if(amount.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            amount.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            amount.change_fraction_size(asset(0, FPCH_SYMBOL).decimals());
-         }
-      }
-   }
 
    FC_ASSERT( _db.get_balance( from_account, amount.symbol ) >= amount, "Account does not have sufficient funds for transfer." );
    _db.adjust_balance( from_account, -amount );
    _db.adjust_balance( to_account, amount );
 }
 
+void account_bobserver_vote_evaluator::do_apply( const account_bobserver_vote_operation& o )
+{
+   const auto& voter = _db.get_account( o.account );
+
+   if( o.approve )
+      FC_ASSERT( voter.can_vote, "Account has declined its voting rights." );
+
+   const auto& bobserver = _db.get_bobserver( o.bobserver );
+
+   const auto& by_account_bobserver_idx = _db.get_index< bobserver_vote_index >().indices().get< by_account_bobserver >();
+   auto itr = by_account_bobserver_idx.find( boost::make_tuple( voter.id, bobserver.id ) );
+
+   if( itr == by_account_bobserver_idx.end() ) {
+      FC_ASSERT( o.approve, "Vote doesn't exist, user must indicate a desire to approve bobserver." );
+      FC_ASSERT( voter.bobservers_voted_for < FUTUREPIA_MAX_ACCOUNT_BOBSERVER_VOTES, "Account has voted for too many bobservers." ); // TODO: Remove after hardfork 2
+
+      _db.create<bobserver_vote_object>( [&]( bobserver_vote_object& v ) {
+          v.bobserver = bobserver.id;
+          v.account = voter.id;
+      });
+      
+      _db.adjust_bobserver_vote( bobserver, 1 );
+      
+      _db.modify( voter, [&]( account_object& a ) {
+         a.bobservers_voted_for++;
+      });
+
+   } else {
+      FC_ASSERT( !o.approve, "Vote currently exists, user must indicate a desire to reject bobserver." );
+      
+      _db.adjust_bobserver_vote( bobserver, -1 );
+      
+      _db.modify( voter, [&]( account_object& a ) {
+         a.bobservers_voted_for--;
+      });
+      _db.remove( *itr );
+   }
+}
+
+void account_bproducer_appointment_evaluator::do_apply( const account_bproducer_appointment_operation& o )
+{
+   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2))
+   {
+      FC_ASSERT( false, "account_bproducer_appointment_operation do not use it anymore." );
+   }
+   else if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_1))
+   {
+      const auto& bobserver = _db.get_bobserver( o.bobserver );
+
+      const auto& by_account_bobserver_idx = _db.get_index< bobserver_index >().indices().get< by_name >();
+      auto itr = by_account_bobserver_idx.find( o.bobserver );
+
+      FC_ASSERT(itr != by_account_bobserver_idx.end());
+
+      const dynamic_global_property_object& _dgp = _db.get_dynamic_global_properties();
+
+      if (o.approve)
+         FC_ASSERT(FUTUREPIA_MAX_VOTED_BOBSERVERS_HF0 > _dgp.current_bproducer_count );
+
+      _db.modify( bobserver, [&]( bobserver_object& b ) {
+         if (o.approve != b.is_bproducer) {      
+            b.is_bproducer = o.approve;
+
+            _db.modify( _dgp, [&]( dynamic_global_property_object& dgp )
+            {
+               dgp.current_bproducer_count = o.approve ? dgp.current_bproducer_count + 1 : dgp.current_bproducer_count - 1;
+            });
+         }
+      });
+
+      dlog( "current_bproducer_count : ${c}, BP = ${bp}", ( "c",_dgp.current_bproducer_count )( "bp", o.bobserver ) );
+   }
+}
+
+void except_bobserver_evaluator::do_apply( const except_bobserver_operation& o )
+{
+   const auto& bobserver = _db.get_bobserver( o.bobserver );
+
+   const auto& by_account_bobserver_idx = _db.get_index< bobserver_index >().indices().get< by_name >();
+   auto itr = by_account_bobserver_idx.find( o.bobserver );
+
+   FC_ASSERT(itr != by_account_bobserver_idx.end());
+   FC_ASSERT(itr->is_bproducer == false);
+
+   _db.modify( bobserver, [&]( bobserver_object& b ) {
+      b.is_excepted = true;
+   });
+}
+
+void comment_vote_evaluator::do_apply( const comment_vote_operation& o )
+{ try {
+   const auto& comment = _db.get_comment( o.author, o.permlink );
+   const auto& voter   = _db.get_account( o.voter );
+
+   FC_ASSERT( voter.can_vote, "Voter has declined their voting rights." );
+   FC_ASSERT( comment.allow_votes, "This comment(feed) can't be vote for.");
+
+   comment_vote_type vote_type = static_cast<comment_vote_type>(o.vote_type);
+
+   // dlog( "comment = ${comment}, voter = ${voter}, vote_type = ${type}", ( "comment", comment.id )( "voter", voter.id )( "type", vote_type ) );
+   const auto& comment_vote_idx = _db.get_index< comment_vote_index >().indices().get< by_comment_voter >();
+   auto comment_itr = comment_vote_idx.find( std::make_tuple( comment.id, voter.id, vote_type ) );
+
+   auto now_time = _db.head_block_time();
+
+   // int64_t elapsed_seconds = ( now_time - voter.last_vote_time ).to_seconds();
+   // FC_ASSERT( elapsed_seconds >= FUTUREPIA_MIN_VOTE_INTERVAL_SEC, "Can only vote once every 3 seconds." );
+
+   if( comment_itr != comment_vote_idx.end()  )
+      FC_ASSERT( comment.group_id > 0, "A main feed can only vote once per an account.");
+
+   _db.modify(voter, [&](account_object &a) {
+      a.last_vote_time = now_time;
+   });
+
+   _db.modify(comment, [&](comment_object &c) {
+      if (vote_type == comment_vote_type::LIKE)
+         c.like_count++;
+      else if (vote_type == comment_vote_type::DISLIKE)
+         c.dislike_count++;
+   });
+
+   _db.create<comment_vote_object>([&](comment_vote_object &cv) {
+      cv.voter = voter.id;
+      cv.comment = comment.id;
+      cv.created = now_time;
+      cv.vote_type = vote_type;
+      cv.voting_amount = o.voting_amount;
+   });
+} FC_CAPTURE_AND_RETHROW( (o)) }
+
+void comment_betting_evaluator::do_apply( const comment_betting_operation& o )
+{
+   try {
+      const auto& comment = _db.get_comment( o.author, o.permlink );
+      const auto& bettor = _db.get_account( o.bettor );
+
+   comment_betting_type betting_type = static_cast<comment_betting_type>(o.betting_type);
+
+      // const auto& state_idx = _db.get_index< comment_betting_state_index >().indices().get< by_betting_state_comment >();
+      // auto state_itr = state_idx.find( boost::make_tuple( comment.id, o.round_no ) );
+      // FC_ASSERT( state_itr != state_idx.end(), "There isn't betting information of comment." );
+      // if( betting_type == comment_betting_type::BETTING )
+      //    FC_ASSERT( state_itr->allow_betting, "This comment doesn't allow betting");
+
+      const auto& betting_idx = _db.get_index< comment_betting_index >().indices().get< by_betting_comment >();
+      auto betting_itr = betting_idx.find( boost::make_tuple( comment.id, betting_type, o.round_no, bettor.id ) );
+
+      if( betting_type == comment_betting_type::RECOMMEND )
+         FC_ASSERT( betting_itr == betting_idx.end(), "Already recommend this comment" );
+      else if( betting_type == comment_betting_type::BETTING )
+         FC_ASSERT( betting_itr == betting_idx.end(), "Already bet on this comment" );
+
+      if( o.amount.symbol == PIA_SYMBOL )
+         FC_ASSERT( bettor.balance >= o.amount, "The balance(${balance}) is not enough.", ("balance", bettor.balance) );
+      else if( o.amount.symbol == SNAC_SYMBOL )
+         FC_ASSERT( bettor.snac_balance >= o.amount, "The balance(${balance}) is not enough.", ("balance", bettor.snac_balance) );
+
+      _db.create< comment_betting_object >( [&]( comment_betting_object& object)
+      {
+         object.comment = comment.id;
+         object.bettor = bettor.id;
+         object.round_no = o.round_no;
+         object.betting_type = betting_type;
+         object.betting_amount = o.amount;
+         object.created = _db.head_block_time();
+      });
+
+      // _db.modify( *state_itr, [&]( comment_betting_state_object& object )
+      // {
+      //    if( betting_type == comment_betting_type::RECOMMEND )
+      //       object.recommend_count++;
+      //    else if( betting_type == comment_betting_type::BETTING )
+      //       object.betting_count++;
+      // });
+   } FC_CAPTURE_AND_RETHROW( (o) )
+}
 
 void custom_evaluator::do_apply( const custom_operation& o )
 {
@@ -554,7 +642,32 @@ void custom_json_evaluator::do_apply( const custom_json_operation& o )
    if( d.is_producing() )
       FC_ASSERT( o.json.length() <= 8192, "custom_json_operation json must be less than 8k" );
 
-   std::shared_ptr< custom_operation_interpreter > eval = d.get_custom_json_evaluator( o.id );
+   std::shared_ptr< custom_operation_interpreter > eval = d.get_custom_evaluator( o.id );
+   if( !eval )
+      return;
+
+   try
+   {
+      eval->apply( o );
+   }
+   catch( const fc::exception& e )
+   {
+      if( d.is_producing() )
+         throw e;
+   }
+   catch(...)
+   {
+      elog( "Unexpected exception applying custom json evaluator." );
+   }
+}
+
+void custom_json_hf2_evaluator::do_apply( const custom_json_hf2_operation& o )
+{
+   database& d = db();
+   if( d.is_producing() )
+      FC_ASSERT( o.json.length() <= 8192, "custom_json_hf2_operation json must be less than 8k" );
+
+   std::shared_ptr< custom_operation_interpreter > eval = d.get_custom_evaluator( o.id );
    if( !eval )
       return;
 
@@ -584,7 +697,7 @@ void custom_binary_evaluator::do_apply( const custom_binary_operation& o )
    }
    FC_ASSERT( true );
 
-   std::shared_ptr< custom_operation_interpreter > eval = d.get_custom_json_evaluator( o.id );
+   std::shared_ptr< custom_operation_interpreter > eval = d.get_custom_evaluator( o.id );
    if( !eval )
       return;
 
@@ -603,409 +716,98 @@ void custom_binary_evaluator::do_apply( const custom_binary_operation& o )
    }
 }
 
-
-template<typename Operation>
-void pow_apply( database& db, Operation o )
+void convert_evaluator::do_apply( const convert_operation& o )
 {
-   const auto& dgp = db.get_dynamic_global_properties();
-
-   const auto& bobserver_by_work = db.get_index<bobserver_index>().indices().get<by_work>();
-   auto work_itr = bobserver_by_work.find( o.work.work );
-   if( work_itr != bobserver_by_work.end() )
+   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2))
    {
-       FC_ASSERT( !"DUPLICATE WORK DISCOVERED", "${w}  ${bobserver}",("w",o)("wit",*work_itr) );
+      FC_ASSERT( false, "convert_operation do not use it anymore." );
    }
-
-   chain_properties props = o.props;
-   if(db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
+   else if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_1))
    {
-      if(o.props.account_creation_fee.decimals() == 3) {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         if(props.account_creation_fee.symbol_name() == fpc_sym.symbol_name()) 
+      const auto& owner = _db.get_account( o.owner );
+      asset amount = o.amount;
+      FC_ASSERT( _db.get_balance( owner, amount.symbol ) >= amount, "Account does not have sufficient balance for conversion." );
+
+      try
+      {
+         if ( amount.symbol == PIA_SYMBOL )
          {
-            props.account_creation_fee.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            props.account_creation_fee.change_fraction_size(asset(0, FPCH_SYMBOL).decimals());
+            _db.adjust_balance( owner, -amount );
+            _db.adjust_balance( owner, _db.to_snac( amount ) );
+            _db.adjust_supply( -amount );
+            _db.adjust_supply( _db.to_snac( amount ) );
          }
-      }
+         else if ( amount.symbol == SNAC_SYMBOL )
+         {
+            _db.check_total_supply( amount );
+            _db.adjust_balance( owner, -amount );
+            _db.adjust_balance( owner, _db.to_pia( amount ) );
+            _db.adjust_supply( -amount );
+            _db.adjust_supply( _db.to_pia( amount ) );
+         }
+      } FC_CAPTURE_AND_RETHROW( (owner)(amount) )
    }
-
-   const auto& accounts_by_name = db.get_index<account_index>().indices().get<by_name>();
-
-   auto itr = accounts_by_name.find(o.get_worker_account());
-   if(itr == accounts_by_name.end())
-   {
-      db.create< account_object >( [&]( account_object& acc )
-      {
-         acc.name = o.get_worker_account();
-         acc.memo_key = o.work.worker;
-         acc.created = dgp.time;
-         acc.last_vote_time = dgp.time;
-         acc.recovery_account = ""; /// highest voted bobserver at time of recovery
-      });
-
-      db.create< account_authority_object >( [&]( account_authority_object& auth )
-      {
-         auth.account = o.get_worker_account();
-         auth.owner = authority( 1, o.work.worker, 1);
-         auth.active = auth.owner;
-         auth.posting = auth.owner;
-      });
-   }
-
-   const auto& worker_account = db.get_account( o.get_worker_account() ); // verify it exists
-   const auto& worker_auth = db.get< account_authority_object, by_account >( o.get_worker_account() );
-   FC_ASSERT( worker_auth.active.num_auths() == 1, "Miners can only have one key authority. ${a}", ("a",worker_auth.active) );
-   FC_ASSERT( worker_auth.active.key_auths.size() == 1, "Miners may only have one key authority." );
-   FC_ASSERT( worker_auth.active.key_auths.begin()->first == o.work.worker, "Work must be performed by key that signed the work." );
-   FC_ASSERT( o.block_id == db.head_block_id(), "pow not for last block" );
-   FC_ASSERT( worker_account.last_account_update < db.head_block_time(), "Worker account must not have updated their account this block." );
-
-   fc::sha256 target = db.get_pow_target();
-
-   FC_ASSERT( o.work.work < target, "Work lacks sufficient difficulty." );
-
-   db.modify( dgp, [&]( dynamic_global_property_object& p )
-   {
-      p.total_pow++; // make sure this doesn't break anything...
-      p.num_pow_bobservers++;
-   });
-
-
-   const bobserver_object* cur_bobserver = db.find_bobserver( worker_account.name );
-   if( cur_bobserver ) {
-      FC_ASSERT( cur_bobserver->pow_worker == 0, "This account is already scheduled for pow block production." );
-      db.modify(*cur_bobserver, [&]( bobserver_object& w ){
-          w.props             = props;
-          w.pow_worker        = dgp.total_pow;
-          w.last_work         = o.work.work;
-      });
-   } else {
-      db.create<bobserver_object>( [&]( bobserver_object& w )
-      {
-          w.owner             = o.get_worker_account();
-          w.props             = props;
-          w.signing_key       = o.work.worker;
-          w.pow_worker        = dgp.total_pow;
-          w.last_work         = o.work.work;
-      });
-   }
-   /// POW reward depends upon whether we are before or after MINER_VOTING kicks in
-   asset pow_reward = db.get_pow_reward();
-   if( db.head_block_num() < FUTUREPIA_START_MINER_VOTING_BLOCK )
-   {
-    //    pow_reward.amount *= FUTUREPIA_MAX_BOBSERVERS;
-        pow_reward.amount *= FUTUREPIA_NUM_BOBSERVERS;
-   }
-      
-   db.adjust_supply( pow_reward/*, true */);
-
-   /// pay the bobserver that includes this POW
-   const auto& inc_bobserver = db.get_account( dgp.current_bobserver );
-   if( db.head_block_num() < FUTUREPIA_START_MINER_VOTING_BLOCK )
-      db.adjust_balance( inc_bobserver, pow_reward );
 }
 
-void pow_evaluator::do_apply( const pow_operation& o ) {
-   FC_ASSERT( !false, "pow is deprecated. Use pow2 instead" );
-   pow_apply( db(), o );
+void exchange_evaluator::do_apply( const exchange_operation& o )
+{
+   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2))
+   {
+      const auto& owner = _db.get_account( o.owner );
+      asset amount = o.amount;
+      if (amount.symbol == SNAC_SYMBOL)
+         FC_ASSERT( amount >= FUTUREPIA_EXCHANGE_MIN_BALANCE, "It should be greater than 10000 snac value." );
+      else
+         FC_ASSERT( _db.to_snac(amount) >= FUTUREPIA_EXCHANGE_MIN_BALANCE, "It should be greater than 10000 snac value." );
+      FC_ASSERT( _db.get_balance( owner, amount.symbol ) >= amount, "Account does not have sufficient balance for conversion." );
+
+      /*time_point_sec now_gmt9 = _db.head_block_time() + FUTUREPIA_GMT9;
+      const auto& now_gmt9_str = now_gmt9.to_non_delimited_iso_string();
+      string time = now_gmt9_str.substr(0,8) + FUTUREPIA_3HOURS_STR;*/
+
+      _db.create<exchange_withdraw_object>( [&]( exchange_withdraw_object& s ) {
+         s.from       = o.owner;
+         s.request_id = o.request_id;
+         s.amount     = amount;
+         s.complete   = _db.head_block_time() + fc::minutes(10);
+      });
+
+      _db.modify( owner, [&]( account_object& a )
+      {
+         a.exchange_requests++;
+      });
+      _db.adjust_balance(owner, -amount);
+      _db.adjust_exchange_balance(owner, amount);
+   }
+   else
+   {
+      FC_ASSERT( false, "exchange_operation not ready yet. It will be enabled in hardfork 0.2.0 !" );
+   }
 }
 
-
-void pow2_evaluator::do_apply( const pow2_operation& o )
+void cancel_exchange_evaluator::do_apply( const cancel_exchange_operation& o )
 {
-   database& db = this->db();
-   FC_ASSERT( false, "mining is now disabled" );
-
-   const auto& dgp = db.get_dynamic_global_properties();
-   uint32_t target_pow = db.get_pow_summary_target();
-   account_name_type worker_account;
-
-   chain_properties props = o.props;
-   if(db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
+   if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ) 
    {
-      if(o.props.account_creation_fee.decimals() == 3) {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         if(props.account_creation_fee.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            props.account_creation_fee.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            props.account_creation_fee.change_fraction_size(asset(0, FPCH_SYMBOL).decimals());
-         }
-      }
-   }
+      const auto& ewo = _db.get_exchange_withdraw( o.owner, o.request_id );
 
-   const auto& work = o.work.get< equihash_pow >();
-   FC_ASSERT( work.prev_block == db.head_block_id(), "Equihash pow op not for last block" );
-   auto recent_block_num = protocol::block_header::num_from_id( work.input.prev_block );
-   FC_ASSERT( recent_block_num > dgp.last_irreversible_block_num,
-      "Equihash pow done for block older than last irreversible block num" );
-   FC_ASSERT( work.pow_summary < target_pow, "Insufficient work difficulty. Work: ${w}, Target: ${t}", ("w",work.pow_summary)("t", target_pow) );
-   worker_account = work.input.worker_account;
+      asset  exchange_balance = _db.get_exchange_balance(_db.get_account( ewo.from ), ewo.amount.symbol);
+      FC_ASSERT(exchange_balance >= ewo.amount);
 
-   FC_ASSERT( props.maximum_block_size >= FUTUREPIA_MIN_BLOCK_SIZE_LIMIT * 2, "Voted maximum block size is too small." );
+      _db.adjust_balance( _db.get_account( ewo.from ), ewo.amount );
+      _db.adjust_exchange_balance( _db.get_account( ewo.from ), -ewo.amount );
+      _db.remove( ewo );
 
-   db.modify( dgp, [&]( dynamic_global_property_object& p )
-   {
-      p.total_pow++;
-      p.num_pow_bobservers++;
-   });
-
-   const auto& accounts_by_name = db.get_index<account_index>().indices().get<by_name>();
-   auto itr = accounts_by_name.find( worker_account );
-   if(itr == accounts_by_name.end())
-   {
-      FC_ASSERT( o.new_owner_key.valid(), "New owner key is not valid." );
-      db.create< account_object >( [&]( account_object& acc )
+      const auto& from = _db.get_account( o.owner );
+      _db.modify( from, [&]( account_object& a )
       {
-         acc.name = worker_account;
-         acc.memo_key = *o.new_owner_key;
-         acc.created = dgp.time;
-         acc.last_vote_time = dgp.time;
-         acc.recovery_account = ""; /// highest voted bobserver at time of recovery
-      });
-
-      db.create< account_authority_object >( [&]( account_authority_object& auth )
-      {
-         auth.account = worker_account;
-         auth.owner = authority( 1, *o.new_owner_key, 1);
-         auth.active = auth.owner;
-         auth.posting = auth.owner;
-      });
-
-      db.create<bobserver_object>( [&]( bobserver_object& w )
-      {
-          w.owner             = worker_account;
-          w.props             = props;
-          w.signing_key       = *o.new_owner_key;
-          w.pow_worker        = dgp.total_pow;
+         a.exchange_requests--;
       });
    }
    else
    {
-      FC_ASSERT( !o.new_owner_key.valid(), "Cannot specify an owner key unless creating account." );
-      const bobserver_object* cur_bobserver = db.find_bobserver( worker_account );
-      FC_ASSERT( cur_bobserver, "BObserver must be created for existing account before mining.");
-      FC_ASSERT( cur_bobserver->pow_worker == 0, "This account is already scheduled for pow block production." );
-      db.modify(*cur_bobserver, [&]( bobserver_object& w )
-      {
-          w.props             = props;
-          w.pow_worker        = dgp.total_pow;
-      });
+      FC_ASSERT( false, "cancel_exchange_operation not ready yet. It will be enabled in hardfork 0.2.0 !" );
    }
-}
-
-void feed_publish_evaluator::do_apply( const feed_publish_operation& o )
-{
-  const auto& bobserver = _db.get_bobserver( o.publisher );
-  _db.modify( bobserver, [&]( bobserver_object& w ){
-      w.fpch_exchange_rate = o.exchange_rate;
-      w.last_fpch_exchange_update = _db.head_block_time();
-  });
-}
-
-void convert_evaluator::do_apply( const convert_operation& o )
-{
-  const auto& owner = _db.get_account( o.owner );
-
-   asset amount = o.amount;
-  if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      if(o.amount.decimals() == 3) 
-      {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         asset fpch_sym = asset(0, FPCH_SYMBOL);
-         if(amount.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            amount.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            amount.change_fraction_size(fpch_sym.decimals());
-         }
-      }
-   }
-
-  FC_ASSERT( _db.get_balance( owner, amount.symbol ) >= amount, "Account does not have sufficient balance for conversion." );
-
-  _db.adjust_balance( owner, -amount );
-
-  const auto& fhistory = _db.get_feed_history();
-  FC_ASSERT( !fhistory.current_median_history.is_null(), "Cannot convert FPCH because there is no price feed." );
-
-  auto futurepia_conversion_delay = FUTUREPIA_CONVERSION_DELAY_PRE_HF_16;
-  futurepia_conversion_delay = FUTUREPIA_CONVERSION_DELAY;
-
-  _db.create<convert_request_object>( [&]( convert_request_object& obj )
-  {
-      obj.owner           = o.owner;
-      obj.requestid       = o.requestid;
-      obj.amount          = amount;
-      obj.conversion_date = _db.head_block_time() + futurepia_conversion_delay;
-  });
-
-}
-
-void limit_order_create_evaluator::do_apply( const limit_order_create_operation& o )
-{
-   FC_ASSERT( o.expiration > _db.head_block_time(), "Limit order has to expire after head block time." );
-
-   const auto& owner = _db.get_account( o.owner );
-
-   asset amount_to_sell = o.amount_to_sell;
-   asset min_to_receive = o.min_to_receive;
-
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-      asset fpch_sym = asset(0, FPCH_SYMBOL);
-
-      if(o.amount_to_sell.decimals() == 3) 
-      {
-         if(amount_to_sell.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            amount_to_sell.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            amount_to_sell.change_fraction_size(fpch_sym.decimals());
-         }
-      }
-
-      if(o.min_to_receive.decimals() == 3) 
-      {
-         if(min_to_receive.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            min_to_receive.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            min_to_receive.change_fraction_size(fpch_sym.decimals());
-         }
-      }
-   }
-
-   FC_ASSERT( _db.get_balance( owner, amount_to_sell.symbol ) >= amount_to_sell, "Account does not have sufficient funds for limit order." );
-
-   _db.adjust_balance( owner, -amount_to_sell );
-
-   const auto& order = _db.create<limit_order_object>( [&]( limit_order_object& obj )
-   {
-       obj.created    = _db.head_block_time();
-       obj.seller     = o.owner;
-       obj.orderid    = o.orderid;
-       obj.for_sale   = amount_to_sell.amount;
-       obj.sell_price = o.get_price();
-       obj.expiration = o.expiration;
-   });
-
-   bool filled = _db.apply_order( order );
-
-   if( o.fill_or_kill ) FC_ASSERT( filled, "Cancelling order because it was not filled." );
-}
-
-void limit_order_create2_evaluator::do_apply( const limit_order_create2_operation& o )
-{
-   FC_ASSERT( o.expiration > _db.head_block_time(), "Limit order has to expire after head block time." );
-
-   const auto& owner = _db.get_account( o.owner );
-
-   asset amount_to_sell = o.amount_to_sell;
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      if(o.amount_to_sell.decimals() == 3) 
-      {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         asset fpch_sym = asset(0, FPCH_SYMBOL);
-         if(amount_to_sell.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            amount_to_sell.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            amount_to_sell.change_fraction_size(fpch_sym.decimals());
-         }
-      }
-   }
-
-   FC_ASSERT( _db.get_balance( owner, amount_to_sell.symbol ) >= amount_to_sell, "Account does not have sufficient funds for limit order." );
-
-   _db.adjust_balance( owner, -amount_to_sell );
-
-   const auto& order = _db.create<limit_order_object>( [&]( limit_order_object& obj )
-   {
-       obj.created    = _db.head_block_time();
-       obj.seller     = o.owner;
-       obj.orderid    = o.orderid;
-       obj.for_sale   = amount_to_sell.amount;
-       obj.sell_price = o.exchange_rate;
-       obj.expiration = o.expiration;
-   });
-
-   bool filled = _db.apply_order( order );
-
-   if( o.fill_or_kill ) FC_ASSERT( filled, "Cancelling order because it was not filled." );
-}
-
-void limit_order_cancel_evaluator::do_apply( const limit_order_cancel_operation& o )
-{
-   _db.cancel_order( _db.get_limit_order( o.owner, o.orderid ) );
-}
-
-void challenge_authority_evaluator::do_apply( const challenge_authority_operation& o )
-{
-   FC_ASSERT( false, "Challenge authority operation is currently disabled." );
-   const auto& challenged = _db.get_account( o.challenged );
-   const auto& challenger = _db.get_account( o.challenger );
-
-   if( o.require_owner )
-   {
-      FC_ASSERT( challenged.reset_account == o.challenger, "Owner authority can only be challenged by its reset account." );
-      FC_ASSERT( challenger.balance >= FUTUREPIA_OWNER_CHALLENGE_FEE );
-      FC_ASSERT( !challenged.owner_challenged );
-      FC_ASSERT( _db.head_block_time() - challenged.last_owner_proved > FUTUREPIA_OWNER_CHALLENGE_COOLDOWN );
-
-      _db.adjust_balance( challenger, - FUTUREPIA_OWNER_CHALLENGE_FEE );
-
-      _db.modify( challenged, [&]( account_object& a )
-      {
-         a.owner_challenged = true;
-      });
-  }
-  else
-  {
-      FC_ASSERT( challenger.balance >= FUTUREPIA_ACTIVE_CHALLENGE_FEE, "Account does not have sufficient funds to pay challenge fee." );
-      FC_ASSERT( !( challenged.owner_challenged || challenged.active_challenged ), "Account is already challenged." );
-      FC_ASSERT( _db.head_block_time() - challenged.last_active_proved > FUTUREPIA_ACTIVE_CHALLENGE_COOLDOWN, "Account cannot be challenged because it was recently challenged." );
-
-      _db.adjust_balance( challenger, - FUTUREPIA_ACTIVE_CHALLENGE_FEE );
-
-      _db.modify( challenged, [&]( account_object& a )
-      {
-         a.active_challenged = true;
-      });
-  }
-}
-
-void prove_authority_evaluator::do_apply( const prove_authority_operation& o )
-{
-   const auto& challenged = _db.get_account( o.challenged );
-   FC_ASSERT( challenged.owner_challenged || challenged.active_challenged, "Account is not challeneged. No need to prove authority." );
-
-   _db.modify( challenged, [&]( account_object& a )
-   {
-      a.active_challenged = false;
-      a.last_active_proved = _db.head_block_time();
-      if( o.require_owner )
-      {
-         a.owner_challenged = false;
-         a.last_owner_proved = _db.head_block_time();
-      }
-   });
 }
 
 void request_account_recovery_evaluator::do_apply( const request_account_recovery_operation& o )
@@ -1015,7 +817,7 @@ void request_account_recovery_evaluator::do_apply( const request_account_recover
    if ( account_to_recover.recovery_account.length() )   // Make sure recovery matches expected recovery account
       FC_ASSERT( account_to_recover.recovery_account == o.recovery_account, "Cannot recover an account that does not have you as there recovery partner." );
    else                                                  // Empty string recovery account defaults to top bobserver
-      FC_ASSERT( _db.get_index< bobserver_index >().indices().get< by_vote_name >().begin()->owner == o.recovery_account, "Top bobserver must recover an account with no recovery partner." );
+      FC_ASSERT( _db.get_index< bobserver_index >().indices().get< by_vote_name >().begin()->account == o.recovery_account, "Top bobserver must recover an account with no recovery partner." );
 
    const auto& recovery_request_idx = _db.get_index< account_recovery_request_index >().indices().get< by_account >();
    auto request = recovery_request_idx.find( o.account_to_recover );
@@ -1124,72 +926,36 @@ void change_recovery_account_evaluator::do_apply( const change_recovery_account_
    }
 }
 
-void transfer_to_savings_evaluator::do_apply( const transfer_to_savings_operation& op )
+void transfer_savings_evaluator::do_apply( const transfer_savings_operation& op )
 {
    const auto& from = _db.get_account( op.from );
-   const auto& to   = _db.get_account(op.to);
-
-   asset amount = op.amount;
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      if(op.amount.decimals() == 3) 
-      {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         asset fpch_sym = asset(0, FPCH_SYMBOL);
-         if(amount.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            amount.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            amount.change_fraction_size(fpch_sym.decimals());
-         }
-      }
-   }
-
-   FC_ASSERT( _db.get_balance( from, amount.symbol ) >= amount, "Account does not have sufficient funds to transfer to savings." );
-
-   _db.adjust_balance( from, -amount );
-   _db.adjust_savings_balance( to, amount );
-}
-
-void transfer_from_savings_evaluator::do_apply( const transfer_from_savings_operation& op )
-{
-   const auto& from = _db.get_account( op.from );
-   _db.get_account(op.to); // Verify to account exists
+   const auto& to = _db.get_account( op.to );
 
    FC_ASSERT( from.savings_withdraw_requests < FUTUREPIA_SAVINGS_WITHDRAW_REQUEST_LIMIT, "Account has reached limit for pending withdraw requests." );
 
    asset amount = op.amount;
 
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
-   {
-      if(op.amount.decimals() == 3) 
-      {
-         asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-         asset fpch_sym = asset(0, FPCH_SYMBOL);
-         if(amount.symbol_name() == fpc_sym.symbol_name()) 
-         {
-            amount.change_fraction_size(fpc_sym.decimals());
-         } 
-         else 
-         {
-            amount.change_fraction_size(fpch_sym.decimals());
-         }
-      }
-   }
-
-   FC_ASSERT( _db.get_savings_balance( from, amount.symbol ) >= amount );
-   _db.adjust_savings_balance( from, -amount );
+   FC_ASSERT( _db.get_balance( from, amount.symbol ) >= amount );
+   FC_ASSERT( op.complete > _db.head_block_time()  );
+   FC_ASSERT( op.request_id >= 0  );
+   FC_ASSERT( op.split_pay_month >= FUTUREPIA_TRANSFER_SAVINGS_MIN_MONTH 
+         && op.split_pay_month <= FUTUREPIA_TRANSFER_SAVINGS_MAX_MONTH );
+   FC_ASSERT( op.split_pay_order >= FUTUREPIA_TRANSFER_SAVINGS_MIN_MONTH 
+         && op.split_pay_order <= FUTUREPIA_TRANSFER_SAVINGS_MAX_MONTH );
+   _db.adjust_balance( from, -amount );
+   _db.adjust_savings_balance( to, amount );
    _db.create<savings_withdraw_object>( [&]( savings_withdraw_object& s ) {
       s.from   = op.from;
       s.to     = op.to;
       s.amount = amount;
+      s.total_amount = amount;
+      s.split_pay_order = op.split_pay_order;
+      s.split_pay_month = op.split_pay_month;
 #ifndef IS_LOW_MEM
       from_string( s.memo, op.memo );
 #endif
       s.request_id = op.request_id;
-      s.complete = _db.head_block_time() + FUTUREPIA_SAVINGS_WITHDRAW_TIME;
+      s.complete = op.complete;
    });
 
    _db.modify( from, [&]( account_object& a )
@@ -1198,10 +964,15 @@ void transfer_from_savings_evaluator::do_apply( const transfer_from_savings_oper
    });
 }
 
-void cancel_transfer_from_savings_evaluator::do_apply( const cancel_transfer_from_savings_operation& op )
+void cancel_transfer_savings_evaluator::do_apply( const cancel_transfer_savings_operation& op )
 {
    const auto& swo = _db.get_savings_withdraw( op.from, op.request_id );
-   _db.adjust_savings_balance( _db.get_account( swo.from ), swo.amount );
+
+   asset  savings_balance = _db.get_savings_balance(_db.get_account( swo.to ), swo.amount.symbol);
+   FC_ASSERT(savings_balance >= swo.amount);
+
+   _db.adjust_balance( _db.get_account( swo.from ), swo.amount );
+   _db.adjust_savings_balance( _db.get_account( swo.to ), -swo.amount );
    _db.remove( swo );
 
    const auto& from = _db.get_account( op.from );
@@ -1209,6 +980,27 @@ void cancel_transfer_from_savings_evaluator::do_apply( const cancel_transfer_fro
    {
       a.savings_withdraw_requests--;
    });
+}
+
+void conclusion_transfer_savings_evaluator::do_apply( const conclusion_transfer_savings_operation& op )
+{
+   const auto& swo = _db.get_savings_withdraw( op.from, op.request_id );
+   
+   asset  savings_balance = _db.get_savings_balance(_db.get_account( swo.to ), swo.amount.symbol);
+   FC_ASSERT(savings_balance >= swo.amount);
+
+   _db.adjust_balance( _db.get_account( swo.to ), swo.amount );
+   _db.adjust_savings_balance( _db.get_account( swo.to ), -swo.amount );
+
+   const auto& from = _db.get_account( swo.from );
+   _db.modify( from, [&]( account_object& a )
+   {
+      a.savings_withdraw_requests--;
+   });
+
+   _db.push_virtual_operation( fill_transfer_savings_operation( swo.from, swo.to, swo.amount, swo.total_amount, swo.split_pay_order, swo.split_pay_month, swo.request_id, to_string( swo.memo) ) );
+   _db.remove( swo );
+   
 }
 
 void decline_voting_rights_evaluator::do_apply( const decline_voting_rights_operation& o )
@@ -1239,66 +1031,187 @@ void decline_voting_rights_evaluator::do_apply( const decline_voting_rights_oper
 void reset_account_evaluator::do_apply( const reset_account_operation& op )
 {
    FC_ASSERT( false, "Reset Account Operation is currently disabled." );
-/*
-   const auto& acnt = _db.get_account( op.account_to_reset );
-   auto band = _db.find< account_bandwidth_object, by_account_bandwidth_type >( boost::make_tuple( op.account_to_reset, bandwidth_type::old_forum ) );
-   if( band != nullptr )
-      FC_ASSERT( ( _db.head_block_time() - band->last_bandwidth_update ) > fc::days(60), "Account must be inactive for 60 days to be eligible for reset" );
-   FC_ASSERT( acnt.reset_account == op.reset_account, "Reset account does not match reset account on account." );
-
-   _db.update_owner_authority( acnt, op.new_owner_authority );
-*/
 }
 
 void set_reset_account_evaluator::do_apply( const set_reset_account_operation& op )
 {
    FC_ASSERT( false, "Set Reset Account Operation is currently disabled." );
-/*
-   const auto& acnt = _db.get_account( op.account );
-   _db.get_account( op.reset_account );
-
-   FC_ASSERT( acnt.reset_account == op.current_reset_account, "Current reset account does not match reset account on account." );
-   FC_ASSERT( acnt.reset_account != op.reset_account, "Reset account must change" );
-
-   _db.modify( acnt, [&]( account_object& a )
-   {
-       a.reset_account = op.reset_account;
-   });
-*/
 }
 
-void claim_reward_balance_evaluator::do_apply( const claim_reward_balance_operation& op )
+void print_evaluator::do_apply( const print_operation& o )
 {
-   const auto& acnt = _db.get_account( op.account );
-
-   asset reward_futurepia = op.reward_futurepia;
-   asset reward_fpch = op.reward_fpch;
-
-   if(_db.has_hardfork(FUTUREPIA_HARDFORK_0_2)) 
+   if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ) 
    {
-      asset fpc_sym = asset(0, FUTUREPIA_SYMBOL);
-      asset fpch_sym = asset(0, FPCH_SYMBOL);
-      if(op.reward_futurepia.decimals() == 3) 
-      {
-         reward_futurepia.change_fraction_size(fpc_sym.decimals());
-      }
+      FC_ASSERT( false, "print_operation do not use it anymore." );
+   }
+   else if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_1 ) ) 
+   {
+      const auto& account = _db.get_account( o.account );
+      asset amount = o.amount;
 
-      if(op.reward_fpch.decimals() == 3) 
+      try
       {
-         reward_fpch.change_fraction_size(fpch_sym.decimals());
+         if (amount.symbol == PIA_SYMBOL)
+            _db.check_total_supply( amount );
+         else
+            _db.check_virtual_supply( amount );
+         _db.adjust_balance( account, amount );
+         _db.adjust_supply( amount );
+         _db.adjust_printed_supply( amount );
+      } FC_CAPTURE_AND_RETHROW( (account)(amount) )
+   }
+}
+
+void burn_evaluator::do_apply( const burn_operation& o )
+{
+   if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ) 
+   {
+      FC_ASSERT( false, "burn_operation do not use it anymore." );
+   }
+   else if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_1 ) ) 
+   {
+      const auto& account = _db.get_account( o.account );
+      asset amount = o.amount;
+
+      try
+      {
+         _db.adjust_balance( account, -amount );
+         _db.adjust_supply( -amount );
+         _db.adjust_printed_supply( -amount );
+      } FC_CAPTURE_AND_RETHROW( (account)(amount) )
+   }
+}
+
+void exchange_rate_evaluator::do_apply( const exchange_rate_operation& o )
+{
+   if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ) 
+   {
+      _db.get_account( o.owner ); // verify owner exists
+      _db.check_virtual_supply(o.rate);
+      const auto& by_bproducer_name_idx = _db.get_index< bobserver_index >().indices().get< by_bp_owner >();
+      auto bp_itr = by_bproducer_name_idx.find( o.owner );
+      if( bp_itr != by_bproducer_name_idx.end() && bp_itr->is_bproducer == true)
+      {
+         _db.modify( *bp_itr, [&]( bobserver_object& bp ) {
+            bp.snac_exchange_rate = o.rate;
+            bp.last_snac_exchange_update = _db.head_block_time();
+         });
+      }
+      else 
+      {
+         FC_ASSERT(false, "not found block producer ${bp}",("bp",o.owner));
       }
    }
+   else if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_1 ) ) 
+   {
+      price p = o.rate;
+      
+      try
+      {
+         _db.check_virtual_supply(p);
+         _db.adjust_exchange_rate(p);
+      } FC_CAPTURE_AND_RETHROW( (p) )
+   }
+}
 
-   FC_ASSERT( reward_futurepia <= acnt.reward_futurepia_balance, "Cannot claim that much FPC. Claim: ${c} Actual: ${a}",
-      ("c", reward_futurepia)("a", acnt.reward_futurepia_balance) );
-   FC_ASSERT( reward_fpch <= acnt.reward_fpch_balance, "Cannot claim that much FPCH. Claim: ${c} Actual: ${a}",
-      ("c", reward_fpch)("a", acnt.reward_fpch_balance) );
+void staking_fund_evaluator::do_apply( const staking_fund_operation& op )
+{
+   const auto& from = _db.get_account( op.from );
+   const auto& fund_name = op.fund_name;
+   FC_ASSERT( from.fund_withdraw_requests < FUTUREPIA_DEPOSIT_COUNT_LIMIT, "Account has reached limit for fund withdraw count." );
+   asset amount     = op.amount;
+   uint8_t usertype = op.usertype;
+   uint8_t month    = op.month-1;
 
-   _db.adjust_reward_balance( acnt, -reward_futurepia );
-   _db.adjust_reward_balance( acnt, -reward_fpch );
-   _db.adjust_balance( acnt, reward_futurepia );
-   _db.adjust_balance( acnt, reward_fpch );
+   FC_ASSERT( _db.get_balance( from, amount.symbol ) >= amount );
+   FC_ASSERT( op.request_id >= 0  );
 
+   const auto& percent_interest = _db.get_common_fund(fund_name).percent_interest[usertype][month];
+
+   FC_ASSERT( percent_interest > -1.0 );
+   
+   _db.adjust_balance( from, -amount );
+   _db.adjust_fund_balance( fund_name, amount );
+
+   _db.create<fund_withdraw_object>( [&]( fund_withdraw_object& s ) {
+      s.from   = op.from;
+      from_string( s.fund_name, op.fund_name );
+      s.request_id = op.request_id;
+      s.amount = amount + asset((amount.amount.value * percent_interest)/100.0, PIA_SYMBOL);
+#ifndef IS_LOW_MEM
+      from_string( s.memo, op.memo );
+#endif
+      s.complete = _db.head_block_time() + fc::days(30 * op.month);
+
+      _db.adjust_fund_withdraw_balance( fund_name, s.amount );
+   });
+
+   _db.modify( from, [&]( account_object& a )
+   {
+      a.fund_withdraw_requests++;
+   });
+}
+
+void conclusion_staking_evaluator::do_apply( const conclusion_staking_operation& op )
+{
+   if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ) 
+   {
+      FC_ASSERT( false, "conclusion_staking_operation do not use it anymore." );
+   }
+   else if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_1 ) ) 
+   {
+      const auto& fund_name = op.fund_name;
+      const auto& dwo = _db.get_fund_withdraw( op.from, fund_name, op.request_id );
+      
+      asset  fund_balance = _db.get_common_fund(fund_name).fund_balance;
+      FC_ASSERT(fund_balance >= dwo.amount);
+
+      _db.adjust_balance( _db.get_account( dwo.from ), dwo.amount );
+      _db.adjust_fund_balance(fund_name, -dwo.amount);
+      _db.adjust_fund_withdraw_balance(fund_name, -dwo.amount);
+
+      const auto& from = _db.get_account( dwo.from );
+      _db.modify( from, [&]( account_object& a )
+      {
+         a.fund_withdraw_requests--;
+      });
+
+      _db.push_virtual_operation( fill_staking_fund_operation( dwo.from, fund_name, dwo.amount, dwo.request_id, to_string(dwo.memo) ) );
+      _db.remove( dwo );
+   }
+}
+
+void transfer_fund_evaluator::do_apply( const transfer_fund_operation& o )
+{
+   const auto& from_account = _db.get_account(o.from);
+   const auto& fund_name = o.fund_name;
+
+   asset amount = o.amount;
+
+   FC_ASSERT( _db.get_balance( from_account, amount.symbol ) >= amount, "Account does not have sufficient funds for transfer." );
+   _db.adjust_fund_balance( fund_name, amount );
+   _db.adjust_balance( from_account, -amount );
+}
+
+void set_fund_interest_evaluator::do_apply( const set_fund_interest_operation& o )
+{
+   if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ) 
+   {
+      FC_ASSERT( false, "set_fund_interest_operation do not use it anymore." );
+   }
+   else if( _db.has_hardfork( FUTUREPIA_HARDFORK_0_1 ) ) 
+   {
+      const auto& fund_name = o.fund_name;
+      const auto& usertype = o.usertype;
+      const auto& month = o.month-1;
+      const auto& percent_interest = o.percent_interest;
+
+      _db.modify( _db.get< common_fund_object, by_name >( fund_name ), [&]( common_fund_object &cfo )
+      {
+         cfo.percent_interest[usertype][month] = fc::to_double(percent_interest);
+         cfo.last_update = _db.head_block_time();
+      });
+   }
 }
 
 } } // futurepia::chain

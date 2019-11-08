@@ -112,7 +112,6 @@ namespace futurepia { namespace protocol {
       uint32_t            transaction_num = 0;
    };
 
-
    /// @} transactions group
 
 } } // futurepia::protocol

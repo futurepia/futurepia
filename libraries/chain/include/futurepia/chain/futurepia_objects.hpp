@@ -4,6 +4,8 @@
 #include <futurepia/protocol/futurepia_operations.hpp>
 
 #include <futurepia/chain/futurepia_object_types.hpp>
+#include <futurepia/chain/comment_object.hpp>
+#include <futurepia/chain/account_object.hpp>
 
 #include <boost/multi_index/composite_key.hpp>
 #include <boost/multiprecision/cpp_int.hpp>
@@ -15,60 +17,7 @@ namespace futurepia { namespace chain {
    using futurepia::protocol::price;
    using futurepia::protocol::asset_symbol_type;
 
-   typedef protocol::fixed_string_16 reward_fund_name_type;
-
-   /**
-    *  This object is used to track pending requests to convert fpch to futurepia
-    */
-   class convert_request_object : public object< convert_request_object_type, convert_request_object >
-   {
-      public:
-         template< typename Constructor, typename Allocator >
-         convert_request_object( Constructor&& c, allocator< Allocator > a )
-         {
-            c( *this );
-         }
-
-         convert_request_object(){}
-
-         id_type           id;
-
-         account_name_type owner;
-         uint32_t          requestid = 0; ///< id set by owner, the owner,requestid pair must be unique
-         asset             amount;
-         time_point_sec    conversion_date; ///< at this time the feed_history_median_price * amount
-   };
-
-
-   class escrow_object : public object< escrow_object_type, escrow_object >
-   {
-      public:
-         template< typename Constructor, typename Allocator >
-         escrow_object( Constructor&& c, allocator< Allocator > a )
-         {
-            c( *this );
-         }
-
-         escrow_object(){}
-
-         id_type           id;
-
-         uint32_t          escrow_id = 20;
-         account_name_type from;
-         account_name_type to;
-         account_name_type agent;
-         time_point_sec    ratification_deadline;
-         time_point_sec    escrow_expiration;
-         asset             fpch_balance;
-         asset             futurepia_balance;
-         asset             pending_fee;
-         bool              to_approved = false;
-         bool              agent_approved = false;
-         bool              disputed = false;
-
-         bool              is_approved()const { return to_approved && agent_approved; }
-   };
-
+   typedef protocol::fixed_string_16 common_fund_name_type;
 
    class savings_withdraw_object : public object< savings_withdraw_object_type, savings_withdraw_object >
    {
@@ -89,125 +38,51 @@ namespace futurepia { namespace chain {
          shared_string     memo;
          uint32_t          request_id = 0;
          asset             amount;
+         asset             total_amount;
+         uint8_t           split_pay_order = 0;
+         uint8_t           split_pay_month = 0;
          time_point_sec    complete;
    };
 
-
-   /**
-    *  If last_update is greater than 1 week, then volume gets reset to 0
-    *
-    *  When a user is a maker, their volume increases
-    *  When a user is a taker, their volume decreases
-    *
-    *  Every 1000 blocks, the account that has the highest volume_weight() is paid the maximum of
-    *  1000 FPC or 1000 * virtual_supply / (100*blocks_per_year) aka 10 * virtual_supply / blocks_per_year
-    *
-    *  After being paid volume gets reset to 0
-    */
-   class liquidity_reward_balance_object : public object< liquidity_reward_balance_object_type, liquidity_reward_balance_object >
+   class fund_withdraw_object : public object< fund_withdraw_object_type, fund_withdraw_object >
    {
+      fund_withdraw_object() = delete;
+
       public:
          template< typename Constructor, typename Allocator >
-         liquidity_reward_balance_object( Constructor&& c, allocator< Allocator > a )
+         fund_withdraw_object( Constructor&& c, allocator< Allocator > a )
+            :fund_name( a ), memo( a )
          {
             c( *this );
          }
-
-         liquidity_reward_balance_object(){}
 
          id_type           id;
 
-         account_id_type   owner;
-         int64_t           futurepia_volume = 0;
-         int64_t           fpch_volume = 0;
-         uint128_t         weight = 0;
-
-         time_point_sec    last_update = fc::time_point_sec::min(); /// used to decay negative liquidity balances. block num
-
-         /// this is the sort index
-         uint128_t volume_weight()const
-         {
-            return futurepia_volume * fpch_volume * is_positive();
-         }
-
-         uint128_t min_volume_weight()const
-         {
-            return std::min(futurepia_volume,fpch_volume) * is_positive();
-         }
-
-         void update_weight( bool hf9 )
-         {
-             weight = hf9 ? min_volume_weight() : volume_weight();
-         }
-
-         inline int is_positive()const
-         {
-            return ( futurepia_volume > 0 && fpch_volume > 0 ) ? 1 : 0;
-         }
+         account_name_type from;
+         shared_string     fund_name;
+         shared_string     memo;
+         uint32_t          request_id = 0;
+         asset             amount;
+         time_point_sec    complete;
    };
 
-
-   /**
-    *  This object gets updated once per hour, on the hour
-    */
-   class feed_history_object  : public object< feed_history_object_type, feed_history_object >
+   class exchange_withdraw_object : public object< exchange_withdraw_object_type, exchange_withdraw_object >
    {
-      feed_history_object() = delete;
+      exchange_withdraw_object() = delete;
 
       public:
          template< typename Constructor, typename Allocator >
-         feed_history_object( Constructor&& c, allocator< Allocator > a )
-            :price_history( a.get_segment_manager() )
+         exchange_withdraw_object( Constructor&& c, allocator< Allocator > a )
          {
             c( *this );
          }
-
-         id_type                                   id;
-
-         price                                     current_median_history; ///< the current median of the price history, used as the base for convert operations
-         bip::deque< price, allocator< price > >   price_history; ///< tracks this last week of median_feed one per hour
-   };
-
-
-   /**
-    *  @brief an offer to sell a amount of a asset at a specified exchange rate by a certain time
-    *  @ingroup object
-    *  @ingroup protocol
-    *  @ingroup market
-    *
-    *  This limit_order_objects are indexed by @ref expiration and is automatically deleted on the first block after expiration.
-    */
-   class limit_order_object : public object< limit_order_object_type, limit_order_object >
-   {
-      public:
-         template< typename Constructor, typename Allocator >
-         limit_order_object( Constructor&& c, allocator< Allocator > a )
-         {
-            c( *this );
-         }
-
-         limit_order_object(){}
 
          id_type           id;
-
-         time_point_sec    created;
-         time_point_sec    expiration;
-         account_name_type seller;
-         uint32_t          orderid = 0;
-         share_type        for_sale; ///< asset id is sell_price.base.symbol
-         price             sell_price;
-
-         pair< asset_symbol_type, asset_symbol_type > get_market()const
-         {
-            return sell_price.base.symbol < sell_price.quote.symbol ?
-                std::make_pair( sell_price.base.symbol, sell_price.quote.symbol ) :
-                std::make_pair( sell_price.quote.symbol, sell_price.base.symbol );
-         }
-
-         asset amount_for_sale()const   { return asset( for_sale, sell_price.base.symbol ); }
-         asset amount_to_receive()const { return amount_for_sale() * sell_price; }
+         account_name_type from;
+         uint32_t          request_id = 0;
+         asset             amount;
+         time_point_sec    complete;
    };
-
 
    class decline_voting_rights_request_object : public object< decline_voting_rights_request_object_type, decline_voting_rights_request_object >
    {
@@ -225,158 +100,41 @@ namespace futurepia { namespace chain {
          account_id_type   account;
          time_point_sec    effective_date;
    };
-
-   enum curve_id
-   {
-      quadratic,
-      quadratic_curation,
-      linear,
-      square_root
-   };
-
-   class reward_fund_object : public object< reward_fund_object_type, reward_fund_object >
+   
+   class common_fund_object : public object< common_fund_object_type, common_fund_object >
    {
       public:
          template< typename Constructor, typename Allocator >
-         reward_fund_object( Constructor&& c, allocator< Allocator > a )
+         common_fund_object( Constructor&& c, allocator< Allocator > a )
          {
             c( *this );
          }
 
-         reward_fund_object() {}
+         common_fund_object() {}
 
-         reward_fund_id_type     id;
-         reward_fund_name_type   name;
-         asset                   reward_balance = asset( 0, FUTUREPIA_SYMBOL );
-         fc::uint128_t           recent_claims = 0;
-         time_point_sec          last_update;
-         uint128_t               content_constant = 0;
-         uint16_t                percent_curation_rewards = 0;
-         uint16_t                percent_content_rewards = 0;
-         curve_id                author_reward_curve = linear;
-         curve_id                curation_reward_curve = square_root;
+         common_fund_id_type                 id;
+         common_fund_name_type               name;
+         asset                               fund_balance = asset( 0, PIA_SYMBOL );
+         asset                               fund_withdraw_ready = asset( 0, PIA_SYMBOL );
+         fc::array<fc::array<double,FUTUREPIA_MAX_STAKING_MONTH>,FUTUREPIA_MAX_USER_TYPE>   percent_interest;
+         time_point_sec                      last_update;
    };
 
-   struct by_price;
-   struct by_expiration;
-   struct by_account;
-   typedef multi_index_container<
-      limit_order_object,
-      indexed_by<
-         ordered_unique< tag< by_id >, member< limit_order_object, limit_order_id_type, &limit_order_object::id > >,
-         ordered_non_unique< tag< by_expiration >, member< limit_order_object, time_point_sec, &limit_order_object::expiration > >,
-         ordered_unique< tag< by_price >,
-            composite_key< limit_order_object,
-               member< limit_order_object, price, &limit_order_object::sell_price >,
-               member< limit_order_object, limit_order_id_type, &limit_order_object::id >
-            >,
-            composite_key_compare< std::greater< price >, std::less< limit_order_id_type > >
-         >,
-         ordered_unique< tag< by_account >,
-            composite_key< limit_order_object,
-               member< limit_order_object, account_name_type, &limit_order_object::seller >,
-               member< limit_order_object, uint32_t, &limit_order_object::orderid >
-            >
-         >
-      >,
-      allocator< limit_order_object >
-   > limit_order_index;
+   class dapp_reward_fund_object : public object< dapp_reward_fund_object_type, dapp_reward_fund_object>
+   {
+      public:
+         template< typename Constructor, typename Allocator >
+         dapp_reward_fund_object( Constructor&& c, allocator< Allocator > a )
+         {
+            c( *this );
+         }
 
-   struct by_owner;
-   struct by_conversion_date;
-   typedef multi_index_container<
-      convert_request_object,
-      indexed_by<
-         ordered_unique< tag< by_id >, member< convert_request_object, convert_request_id_type, &convert_request_object::id > >,
-         ordered_unique< tag< by_conversion_date >,
-            composite_key< convert_request_object,
-               member< convert_request_object, time_point_sec, &convert_request_object::conversion_date >,
-               member< convert_request_object, convert_request_id_type, &convert_request_object::id >
-            >
-         >,
-         ordered_unique< tag< by_owner >,
-            composite_key< convert_request_object,
-               member< convert_request_object, account_name_type, &convert_request_object::owner >,
-               member< convert_request_object, uint32_t, &convert_request_object::requestid >
-            >
-         >
-      >,
-      allocator< convert_request_object >
-   > convert_request_index;
+         dapp_reward_fund_object(){}
 
-   struct by_owner;
-   struct by_volume_weight;
-
-   typedef multi_index_container<
-      liquidity_reward_balance_object,
-      indexed_by<
-         ordered_unique< tag< by_id >, member< liquidity_reward_balance_object, liquidity_reward_balance_id_type, &liquidity_reward_balance_object::id > >,
-         ordered_unique< tag< by_owner >, member< liquidity_reward_balance_object, account_id_type, &liquidity_reward_balance_object::owner > >,
-         ordered_unique< tag< by_volume_weight >,
-            composite_key< liquidity_reward_balance_object,
-                member< liquidity_reward_balance_object, fc::uint128, &liquidity_reward_balance_object::weight >,
-                member< liquidity_reward_balance_object, account_id_type, &liquidity_reward_balance_object::owner >
-            >,
-            composite_key_compare< std::greater< fc::uint128 >, std::less< account_id_type > >
-         >
-      >,
-      allocator< liquidity_reward_balance_object >
-   > liquidity_reward_balance_index;
-
-   typedef multi_index_container<
-      feed_history_object,
-      indexed_by<
-         ordered_unique< tag< by_id >, member< feed_history_object, feed_history_id_type, &feed_history_object::id > >
-      >,
-      allocator< feed_history_object >
-   > feed_history_index;
-
-
-   struct by_from_id;
-   struct by_to;
-   struct by_agent;
-   struct by_ratification_deadline;
-   struct by_fpch_balance;
-   typedef multi_index_container<
-      escrow_object,
-      indexed_by<
-         ordered_unique< tag< by_id >, member< escrow_object, escrow_id_type, &escrow_object::id > >,
-         ordered_unique< tag< by_from_id >,
-            composite_key< escrow_object,
-               member< escrow_object, account_name_type,  &escrow_object::from >,
-               member< escrow_object, uint32_t, &escrow_object::escrow_id >
-            >
-         >,
-         ordered_unique< tag< by_to >,
-            composite_key< escrow_object,
-               member< escrow_object, account_name_type,  &escrow_object::to >,
-               member< escrow_object, escrow_id_type, &escrow_object::id >
-            >
-         >,
-         ordered_unique< tag< by_agent >,
-            composite_key< escrow_object,
-               member< escrow_object, account_name_type,  &escrow_object::agent >,
-               member< escrow_object, escrow_id_type, &escrow_object::id >
-            >
-         >,
-         ordered_unique< tag< by_ratification_deadline >,
-            composite_key< escrow_object,
-               const_mem_fun< escrow_object, bool, &escrow_object::is_approved >,
-               member< escrow_object, time_point_sec, &escrow_object::ratification_deadline >,
-               member< escrow_object, escrow_id_type, &escrow_object::id >
-            >,
-            composite_key_compare< std::less< bool >, std::less< time_point_sec >, std::less< escrow_id_type > >
-         >,
-         ordered_unique< tag< by_fpch_balance >,
-            composite_key< escrow_object,
-               member< escrow_object, asset, &escrow_object::fpch_balance >,
-               member< escrow_object, escrow_id_type, &escrow_object::id >
-            >,
-            composite_key_compare< std::greater< asset >, std::less< escrow_id_type > >
-         >
-      >,
-      allocator< escrow_object >
-   > escrow_index;
+         dapp_reward_fund_id_type         id;
+         asset                            fund_balance = asset( 0, SNAC_SYMBOL );
+         time_point_sec                   last_update;
+   };
 
    struct by_from_rid;
    struct by_to_complete;
@@ -409,6 +167,81 @@ namespace futurepia { namespace chain {
       allocator< savings_withdraw_object >
    > savings_withdraw_index;
 
+   struct by_from_id;
+   struct by_complete_from;
+   struct by_from_complete;
+   struct by_amount_id;
+   typedef multi_index_container<
+      fund_withdraw_object,
+      indexed_by<
+         ordered_unique< tag< by_id >, member< fund_withdraw_object, fund_withdraw_id_type, &fund_withdraw_object::id > >,
+         ordered_unique< tag< by_from_id >,
+            composite_key< fund_withdraw_object,
+               member< fund_withdraw_object, account_name_type,  &fund_withdraw_object::from >,
+               member< fund_withdraw_object, shared_string,  &fund_withdraw_object::fund_name >,
+               member< fund_withdraw_object, uint32_t, &fund_withdraw_object::request_id >
+            >,
+            composite_key_compare< std::less< account_name_type >, chainbase::strcmp_less, std::less< uint32_t > >
+         >,
+         ordered_unique< tag< by_complete_from >,
+            composite_key< fund_withdraw_object,
+               member< fund_withdraw_object, time_point_sec,  &fund_withdraw_object::complete >,
+               member< fund_withdraw_object, account_name_type,  &fund_withdraw_object::from >,   
+               member< fund_withdraw_object, shared_string,  &fund_withdraw_object::fund_name >,          
+               member< fund_withdraw_object, fund_withdraw_id_type, &fund_withdraw_object::id >
+            >
+         >,
+         ordered_unique< tag< by_from_complete >,
+            composite_key< fund_withdraw_object,
+               member< fund_withdraw_object, account_name_type,  &fund_withdraw_object::from >,
+               member< fund_withdraw_object, shared_string,  &fund_withdraw_object::fund_name >,
+               member< fund_withdraw_object, time_point_sec,  &fund_withdraw_object::complete >,
+               member< fund_withdraw_object, fund_withdraw_id_type, &fund_withdraw_object::id >
+            >,
+            composite_key_compare< std::less< account_name_type >, chainbase::strcmp_less, std::less< time_point_sec >, std::less< fund_withdraw_id_type > >
+         >,
+         ordered_unique< tag< by_amount_id >,
+            composite_key< fund_withdraw_object,
+               member< fund_withdraw_object, shared_string,  &fund_withdraw_object::fund_name >,
+               member< fund_withdraw_object, asset,  &fund_withdraw_object::amount >,
+               member< fund_withdraw_object, fund_withdraw_id_type, &fund_withdraw_object::id >
+            >,
+            composite_key_compare< chainbase::strcmp_less, std::greater< asset >, std::less< fund_withdraw_id_type > >
+         >
+      >,
+      allocator< fund_withdraw_object >
+   > fund_withdraw_index;
+
+   typedef multi_index_container<
+      exchange_withdraw_object,
+      indexed_by<
+         ordered_unique< tag< by_id >, member< exchange_withdraw_object, exchange_withdraw_id_type, &exchange_withdraw_object::id > >,
+         ordered_unique< tag< by_from_id >,
+            composite_key< exchange_withdraw_object,
+               member< exchange_withdraw_object, account_name_type,  &exchange_withdraw_object::from >,
+               member< exchange_withdraw_object, uint32_t, &exchange_withdraw_object::request_id >
+            >,
+            composite_key_compare< std::less< account_name_type >, std::less< uint32_t > >
+         >,
+         ordered_unique< tag< by_complete_from >,
+            composite_key< exchange_withdraw_object,
+               member< exchange_withdraw_object, time_point_sec,  &exchange_withdraw_object::complete >,
+               member< exchange_withdraw_object, account_name_type,  &exchange_withdraw_object::from >,       
+               member< exchange_withdraw_object, exchange_withdraw_id_type, &exchange_withdraw_object::id >
+            >
+         >,
+         ordered_unique< tag< by_from_complete >,
+            composite_key< exchange_withdraw_object,
+               member< exchange_withdraw_object, account_name_type,  &exchange_withdraw_object::from >,
+               member< exchange_withdraw_object, time_point_sec,  &exchange_withdraw_object::complete >,
+               member< exchange_withdraw_object, exchange_withdraw_id_type, &exchange_withdraw_object::id >
+            >,
+            composite_key_compare< std::less< account_name_type >, std::less< time_point_sec >, std::less< exchange_withdraw_id_type > >
+         >
+      >,
+      allocator< exchange_withdraw_object >
+   > exchange_withdraw_index;
+
    struct by_account;
    struct by_effective_date;
    typedef multi_index_container<
@@ -431,63 +264,55 @@ namespace futurepia { namespace chain {
 
    struct by_name;
    typedef multi_index_container<
-      reward_fund_object,
+      common_fund_object,
       indexed_by<
-         ordered_unique< tag< by_id >, member< reward_fund_object, reward_fund_id_type, &reward_fund_object::id > >,
-         ordered_unique< tag< by_name >, member< reward_fund_object, reward_fund_name_type, &reward_fund_object::name > >
+         ordered_unique< tag< by_id >, member< common_fund_object, common_fund_id_type, &common_fund_object::id > >,
+         ordered_unique< tag< by_name >, member< common_fund_object, common_fund_name_type, &common_fund_object::name > >
       >,
-      allocator< reward_fund_object >
-   > reward_fund_index;
+      allocator< common_fund_object >
+   > common_fund_index;
+
+   typedef multi_index_container<
+      dapp_reward_fund_object,
+      indexed_by<
+         ordered_unique< tag< by_id >, member< dapp_reward_fund_object, dapp_reward_fund_id_type, &dapp_reward_fund_object::id > >
+      >,
+      allocator< dapp_reward_fund_object >
+   > dapp_reward_fund_index;
 
 } } // futurepia::chain
 
-#include <futurepia/chain/account_object.hpp>
-
-FC_REFLECT_ENUM( futurepia::chain::curve_id,
-                  (quadratic)(quadratic_curation)(linear)(square_root))
-
-FC_REFLECT( futurepia::chain::limit_order_object,
-             (id)(created)(expiration)(seller)(orderid)(for_sale)(sell_price) )
-CHAINBASE_SET_INDEX_TYPE( futurepia::chain::limit_order_object, futurepia::chain::limit_order_index )
-
-FC_REFLECT( futurepia::chain::feed_history_object,
-             (id)(current_median_history)(price_history) )
-CHAINBASE_SET_INDEX_TYPE( futurepia::chain::feed_history_object, futurepia::chain::feed_history_index )
-
-FC_REFLECT( futurepia::chain::convert_request_object,
-             (id)(owner)(requestid)(amount)(conversion_date) )
-CHAINBASE_SET_INDEX_TYPE( futurepia::chain::convert_request_object, futurepia::chain::convert_request_index )
-
-FC_REFLECT( futurepia::chain::liquidity_reward_balance_object,
-             (id)(owner)(futurepia_volume)(fpch_volume)(weight)(last_update) )
-CHAINBASE_SET_INDEX_TYPE( futurepia::chain::liquidity_reward_balance_object, futurepia::chain::liquidity_reward_balance_index )
 
 
 FC_REFLECT( futurepia::chain::savings_withdraw_object,
-             (id)(from)(to)(memo)(request_id)(amount)(complete) )
+             (id)(from)(to)(memo)(request_id)(amount)(total_amount)(split_pay_order)(split_pay_month)(complete) )
 CHAINBASE_SET_INDEX_TYPE( futurepia::chain::savings_withdraw_object, futurepia::chain::savings_withdraw_index )
-
-FC_REFLECT( futurepia::chain::escrow_object,
-             (id)(escrow_id)(from)(to)(agent)
-             (ratification_deadline)(escrow_expiration)
-             (fpch_balance)(futurepia_balance)(pending_fee)
-             (to_approved)(agent_approved)(disputed) )
-CHAINBASE_SET_INDEX_TYPE( futurepia::chain::escrow_object, futurepia::chain::escrow_index )
 
 FC_REFLECT( futurepia::chain::decline_voting_rights_request_object,
              (id)(account)(effective_date) )
 CHAINBASE_SET_INDEX_TYPE( futurepia::chain::decline_voting_rights_request_object, futurepia::chain::decline_voting_rights_request_index )
 
-FC_REFLECT( futurepia::chain::reward_fund_object,
+FC_REFLECT( futurepia::chain::common_fund_object,
             (id)
             (name)
-            (reward_balance)
-            (recent_claims)
+            (fund_balance)
+            (fund_withdraw_ready)
+            (percent_interest)
             (last_update)
-            (content_constant)
-            (percent_curation_rewards)
-            (percent_content_rewards)
-            (author_reward_curve)
-            (curation_reward_curve)
          )
-CHAINBASE_SET_INDEX_TYPE( futurepia::chain::reward_fund_object, futurepia::chain::reward_fund_index )
+CHAINBASE_SET_INDEX_TYPE( futurepia::chain::common_fund_object, futurepia::chain::common_fund_index )
+
+FC_REFLECT( futurepia::chain::dapp_reward_fund_object,
+            (id)
+            (fund_balance)
+            (last_update)
+         )
+CHAINBASE_SET_INDEX_TYPE( futurepia::chain::dapp_reward_fund_object, futurepia::chain::dapp_reward_fund_index )
+
+FC_REFLECT( futurepia::chain::fund_withdraw_object,
+             (from)(fund_name)(memo)(request_id)(amount)(complete) )
+CHAINBASE_SET_INDEX_TYPE( futurepia::chain::fund_withdraw_object, futurepia::chain::fund_withdraw_index )
+
+FC_REFLECT( futurepia::chain::exchange_withdraw_object,
+             (from)(request_id)(amount)(complete) )
+CHAINBASE_SET_INDEX_TYPE( futurepia::chain::exchange_withdraw_object, futurepia::chain::exchange_withdraw_index )

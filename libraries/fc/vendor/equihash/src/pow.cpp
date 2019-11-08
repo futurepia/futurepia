@@ -1,9 +1,3 @@
-/*Code by Dmitry Khovratovich, 2016
-CC0 license
-
-Modifications by Futurepia, Inc. 2016
-*/
-
 #include <equihash/pow.hpp>
 #include <equihash/blake2.h>
 #include <algorithm>
@@ -175,9 +169,6 @@ Proof Equihash::FindProof(){
     return Proof(n, k, seed, nonce, std::vector<uint32_t>());
 }
 
-/**
- * Added by Futurepia, Inc. for single iteration
- */
 Proof Equihash::FindProof( Nonce _nonce )
 {
     this->nonce = _nonce;

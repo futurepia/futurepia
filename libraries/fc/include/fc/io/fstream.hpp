@@ -1,4 +1,6 @@
 #pragma once
+#include <fstream>
+
 #include <fc/shared_ptr.hpp>
 #include <fc/filesystem.hpp>
 #include <fc/io/iostream.hpp>
@@ -9,10 +11,10 @@ namespace fc {
     public:
       enum mode { out, binary };
       ofstream();
-      ofstream( const fc::path& file, int m = binary );
+      ofstream( const fc::path& file, int m = std::ios::binary );
       ~ofstream();
 
-      void open( const fc::path& file, int m = binary );
+      void open( const fc::path& file, int m = std::ios::binary );
       size_t writesome( const char* buf, size_t len );
       size_t writesome(const std::shared_ptr<const char>& buffer, size_t len, size_t offset);
       void   put( char c );

@@ -308,7 +308,7 @@ namespace detail {
             {
                try
                {
-                  _chain_db->open(_data_dir / "blockchain", _shared_dir, FUTUREPIA_INIT_SUPPLY, _shared_file_size, chainbase::database::read_write );\
+                  _chain_db->open(_data_dir / "blockchain", _shared_dir, FUTUREPIA_INIT_SUPPLY, _shared_file_size, chainbase::database::read_write );
                }
                catch( fc::assert_exception& )
                {
@@ -371,7 +371,6 @@ namespace detail {
             wild_access.password_salt_b64 = "*";
             wild_access.allowed_apis.push_back( "database_api" );
             wild_access.allowed_apis.push_back( "network_broadcast_api" );
-            wild_access.allowed_apis.push_back( "tag_api" );
             _apiaccess.permission_map["*"] = wild_access;
          }
 
@@ -494,7 +493,7 @@ namespace detail {
             time_point_sec now = fc::time_point::now();
 
             uint64_t max_accept_time = now.sec_since_epoch();
-            max_accept_time += allow_future_time;
+            max_accept_time += allow_pia_time;
             FC_ASSERT( blk_msg.block.timestamp.sec_since_epoch() <= max_accept_time );
 
             try {
@@ -882,11 +881,6 @@ namespace detail {
          });
       }
 
-      virtual uint32_t estimate_last_known_fork_from_git_revision_timestamp(uint32_t unix_timestamp) const override
-      {
-         return 0; // there are no forks in graphene
-      }
-
       virtual void error_encountered(const std::string& message, const fc::oexception& error) override
       {
          // notify GUI or something cool
@@ -933,7 +927,7 @@ namespace detail {
 
       bool                                             _running;
 
-      uint32_t allow_future_time = 5;
+      uint32_t allow_pia_time = 5;
    };
 
 }
@@ -962,26 +956,38 @@ application::~application()
 void application::set_program_options(boost::program_options::options_description& command_line_options,
                                       boost::program_options::options_description& configuration_file_options) const
 {
+   std::vector< std::string > default_seed_nodes;
+   default_seed_nodes.push_back( "testnet.futurepia.io:14001" );
+   std::string str_default_seed_nodes = boost::algorithm::join( default_seed_nodes, " " );
+
    std::vector< std::string > default_apis;
    default_apis.push_back( "database_api" );
    default_apis.push_back( "login_api" );
    default_apis.push_back( "account_by_key_api" );
+   default_apis.push_back( "network_broadcast_api" );
+   default_apis.push_back( "dapp_api" );
+   default_apis.push_back( "token_api" );
+   default_apis.push_back( "dapp_history_api" );
    std::string str_default_apis = boost::algorithm::join( default_apis, " " );
 
    std::vector< std::string > default_plugins;
    default_plugins.push_back( "bobserver" );
    default_plugins.push_back( "account_history" );
    default_plugins.push_back( "account_by_key" );
+   default_plugins.push_back( "tags" );
+   default_plugins.push_back( "dapp" );
+   default_plugins.push_back( "token" );
+   default_plugins.push_back( "dapp_history" );
    std::string str_default_plugins = boost::algorithm::join( default_plugins, " " );
 
    configuration_file_options.add_options()
-         ("p2p-endpoint", bpo::value<string>(), "Endpoint for P2P node to listen on")
+         ("p2p-endpoint", bpo::value<string>()->default_value("0.0.0.0:14001"), "Endpoint for P2P node to listen on")
          ("p2p-max-connections", bpo::value<uint32_t>(), "Maxmimum number of incoming connections on P2P endpoint")
-         ("seed-node,s", bpo::value<vector<string>>()->composing(), "P2P nodes to connect to on startup (may specify multiple times)")
+         ("seed-node,s", bpo::value<vector<string>>()->composing()->default_value(default_seed_nodes, str_default_seed_nodes), "P2P nodes to connect to on startup (may specify multiple times)")
          ("checkpoint,c", bpo::value<vector<string>>()->composing(), "Pairs of [BLOCK_NUM,BLOCK_ID] that should be enforced as checkpoints.")
          ("shared-file-dir", bpo::value<string>(), "Location of the shared memory file. Defaults to data_dir/blockchain")
-         ("shared-file-size", bpo::value<string>()->default_value("54G"), "Size of the shared memory file. Default: 54G")
-         ("rpc-endpoint", bpo::value<string>()->implicit_value("127.0.0.1:5020"), "Endpoint for websocket RPC to listen on")
+         ("shared-file-size", bpo::value<string>()->default_value("10G"), "Size of the shared memory file. Default: 10G")
+         ("rpc-endpoint", bpo::value<string>()->default_value("0.0.0.0:15021"), "Endpoint for websocket RPC to listen on")
          ("rpc-tls-endpoint", bpo::value<string>()->implicit_value("127.0.0.1:8089"), "Endpoint for TLS websocket RPC to listen on")
          ("read-forward-rpc", bpo::value<string>(), "Endpoint to forward write API calls to for a read node" )
          ("server-pem,p", bpo::value<string>()->implicit_value("server.pem"), "The TLS certificate file for this server")

@@ -1,9 +1,5 @@
 file(GLOB HEADERS "include/futurepia/manifest/*.hpp")
 
-# helpful hints from
-# https://blog.kangz.net/posts/2016/05/26/integrating-a-code-generator-with-cmake/
-# https://stackoverflow.com/questions/26074450/how-to-include-generated-files-for-compilation-with-cmake
-
 ##############################################################################
 # First, we generate plugins.json by reading all the plugins.json files.
 # We run the Python script once at configure time with execute_process()

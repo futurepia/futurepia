@@ -12,8 +12,7 @@
 #include <fc/log/logger_config.hpp>
 
 #include <futurepia/protocol/version.hpp>
-#include <graphene/utilities/git_revision.hpp>
-#include <fc/git_revision.hpp>
+
 
 #include <boost/filesystem.hpp>
 
@@ -46,24 +45,16 @@ int main(int argc, char** argv) {
    fc::oexception unhandled_exception;
    try {
 
-#ifdef IS_TEST_NET
       std::cerr << "------------------------------------------------------\n\n";
-      std::cerr << "            STARTING TEST NETWORK\n\n";
+      std::cerr << "            STARTING FUTUREPIA TEST NETWORK\n\n";
       std::cerr << "------------------------------------------------------\n";
       auto oneofall_private_key = graphene::utilities::key_to_wif( FUTUREPIA_INIT_PRIVATE_KEY );
       std::cerr << "oneofall public key: " << FUTUREPIA_INIT_PUBLIC_KEY_STR << "\n";
       std::cerr << "oneofall private key: " << oneofall_private_key << "\n";
       std::cerr << "chain id: " << std::string(FUTUREPIA_CHAIN_ID) << "\n";
       std::cerr << "blockchain version: " << fc::string( FUTUREPIA_BLOCKCHAIN_VERSION ) << "\n";
+      std::cerr << "s/w version: " << fc::string( FUTUREPIA_VERSION ) << "\n";
       std::cerr << "------------------------------------------------------\n";
-#else
-      std::cerr << "******************************************************\n\n";
-      std::cerr << "            STARTING FuturePia                        \n\n";
-      std::cerr << "******************************************************\n";
-      std::cerr << "chain id: " << std::string(FUTUREPIA_CHAIN_ID) << "\n";
-      std::cerr << "blockchain version: " << fc::string( FUTUREPIA_BLOCKCHAIN_VERSION ) << "\n";
-      std::cerr << "******************************************************\n";
-#endif
 
       bpo::options_description app_options("Futurepia Daemon");
       bpo::options_description cfg_options("Futurepia Daemon");
@@ -95,8 +86,7 @@ int main(int argc, char** argv) {
       if( options.count("version") )
       {
          std::cout << "futurepia_blockchain_version: " << fc::string( FUTUREPIA_BLOCKCHAIN_VERSION ) << "\n";
-         std::cout << "futurepia_git_revision:       " << fc::string( graphene::utilities::git_revision_sha ) << "\n";
-         std::cout << "fc_git_revision:          " << fc::string( fc::git_revision_sha ) << "\n";
+         std::cout << "futurepia_version: " << fc::string( FUTUREPIA_VERSION ) << "\n";
          return 0;
       }
 
@@ -119,18 +109,6 @@ int main(int argc, char** argv) {
       {
          // get the basic options
          bpo::store(bpo::parse_config_file<char>(config_ini_path.preferred_string().c_str(), cfg_options, true), options);
-
-         // try to get logging options from the config file.
-         try
-         {
-            fc::optional<fc::logging_config> logging_config = load_logging_config_from_ini_file(config_ini_path);
-            if (logging_config)
-               fc::configure_logging(*logging_config);
-         }
-         catch (const fc::exception&)
-         {
-            wlog("Error parsing logging config from config file ${config}, using default config", ("config", config_ini_path.preferred_string()));
-         }
       }
       else
       {
@@ -160,10 +138,35 @@ int main(int argc, char** argv) {
             }
             out_cfg << "\n";
          }
-         write_default_logging_config_to_stream(out_cfg);
+
          out_cfg.close();
-         // read the default logging config we just wrote out to the file and start using it
-         fc::optional<fc::logging_config> logging_config = load_logging_config_from_ini_file(config_ini_path);
+      }
+
+      fc::path log_config_ini_path = data_dir / "log_config.ini";
+      if( fc::exists(log_config_ini_path) )
+      {
+         // try to get logging options from the config file.
+         try
+         {
+            fc::optional<fc::logging_config> logging_config = load_logging_config_from_ini_file(log_config_ini_path);
+            if (logging_config)
+               fc::configure_logging(*logging_config);
+         }
+         catch (const fc::exception&)
+         {
+            wlog("Error parsing logging config from config file ${config}, using default config", ("config", log_config_ini_path.preferred_string()));
+         }
+      }
+      else
+      {
+         ilog("Writing new config file at ${path}", ("path", log_config_ini_path));
+         if( !fc::exists(data_dir) )
+            fc::create_directories(data_dir);
+
+         std::ofstream out_cfg(log_config_ini_path.preferred_string());
+         write_default_logging_config_to_stream(out_cfg);
+
+         fc::optional<fc::logging_config> logging_config = load_logging_config_from_ini_file(log_config_ini_path);
          if (logging_config)
             fc::configure_logging(*logging_config);
       }
@@ -244,16 +247,19 @@ int main(int argc, char** argv) {
 void write_default_logging_config_to_stream(std::ostream& out)
 {
    out << "# declare an appender named \"stderr\" that writes messages to the console\n"
-          "[log.console_appender.stderr]\n"
-          "stream=std_error\n\n"
+          "# [log.console_appender.stderr]\n"
+          "# stream=std_error\n"
+          "[log.file_appender.stderr]\n"
+          "filename=logs/stderr/stderr.log\n"
+          "limit_days=7\n\n"
           "# declare an appender named \"p2p\" that writes messages to p2p.log\n"
           "[log.file_appender.p2p]\n"
           "filename=logs/p2p/p2p.log\n"
-          "# filename can be absolute or relative to this config file\n\n"
+          "limit_days=7\n\n"
           "# route any messages logged to the default logger to the \"stderr\" logger we\n"
           "# declared above, if they are info level are higher\n"
           "[logger.default]\n"
-          "level=warn\n"
+          "level=debug\n"
           "appenders=stderr\n\n"
           "# route messages sent to the \"p2p\" logger to the p2p appender declared above\n"
           "[logger.p2p]\n"
@@ -304,6 +310,8 @@ fc::optional<fc::logging_config> load_logging_config_from_ini_file(const fc::pat
          {
             std::string file_appender_name = section_name.substr(file_appender_section_prefix.length());
             fc::path file_name = section_tree.get<std::string>("filename");
+            std::string limit_days_str = section_tree.get< std::string >( "limit_days" );
+            int limit_days = std::stoi( limit_days_str, nullptr );
             if (file_name.is_relative())
                file_name = fc::absolute(config_ini_filename).parent_path() / file_name;
 
@@ -315,7 +323,7 @@ fc::optional<fc::logging_config> load_logging_config_from_ini_file(const fc::pat
             file_appender_config.flush = true;
             file_appender_config.rotate = true;
             file_appender_config.rotation_interval = fc::hours(1);
-            file_appender_config.rotation_limit = fc::days(1);
+            file_appender_config.rotation_limit = fc::days( limit_days ); 
             logging_config.appenders.push_back(fc::appender_config(file_appender_name, "file", fc::variant(file_appender_config)));
             found_logging_config = true;
          }

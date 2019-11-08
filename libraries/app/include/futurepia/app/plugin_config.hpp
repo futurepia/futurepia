@@ -11,13 +11,12 @@
  * time.
  * */
 
+#ifndef TAG_SPACE_ID
+#define TAG_SPACE_ID 5
+#endif
 
 #ifndef PRIVATE_MESSAGE_SPACE_ID
 #define PRIVATE_MESSAGE_SPACE_ID 6
-#endif
-
-#ifndef MARKET_HISTORY_SPACE_ID
-#define MARKET_HISTORY_SPACE_ID 7
 #endif
 
 #ifndef BLOCKCHAIN_STATISTICS_SPACE_ID
@@ -40,6 +39,13 @@
 #define TOKEN_SPACE_ID 13
 #endif
 
+#ifndef DAPP_SPACE_ID
+#define DAPP_SPACE_ID 15
+#endif
+
+#ifndef DAPP_HISTORY_SPACE_ID
+#define DAPP_HISTORY_SPACE_ID 16
+#endif
 
 
 

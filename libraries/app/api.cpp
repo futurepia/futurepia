@@ -40,9 +40,6 @@
 #include <fc/crypto/hex.hpp>
 #include <fc/smart_ref_impl.hpp>
 
-#include <graphene/utilities/git_revision.hpp>
-#include <fc/git_revision.hpp>
-
 namespace futurepia { namespace app {
 
     login_api::login_api(const api_context& ctx)
@@ -117,10 +114,7 @@ namespace futurepia { namespace app {
 
     futurepia_version_info login_api::get_version()
     {
-       return futurepia_version_info(
-         fc::string( FUTUREPIA_BLOCKCHAIN_VERSION ),
-         fc::string( graphene::utilities::git_revision_sha ),
-         fc::string( fc::git_revision_sha ) );
+       return futurepia_version_info( fc::string( FUTUREPIA_BLOCKCHAIN_VERSION ) );
     }
 
     network_broadcast_api::network_broadcast_api(const api_context& a):_app(a.app)

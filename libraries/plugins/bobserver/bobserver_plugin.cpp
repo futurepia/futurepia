@@ -63,8 +63,8 @@ void new_chain_banner( const futurepia::chain::database& db )
    std::cerr << "\n"
       "************************************\n"
       "*                                  *\n"
-      "*   --------- FuturePia --------   *\n"
-      "*   -   Launch Block Observer  -   *\n"
+      "*   --------- NEW CHAIN --------   *\n"
+      "*   -   Welcome to Futurepia!  -   *\n"
       "*   ----------------------------   *\n"
       "*                                  *\n"
       "************************************\n"
@@ -174,6 +174,19 @@ namespace detail
       template< typename T >
       void operator()( const T& )const {}
 
+      void operator()( const comment_operation& o )const
+      {
+         if( o.parent_author != FUTUREPIA_ROOT_POST_PARENT )
+         {
+            const auto& parent = _db.find_comment( o.parent_author, o.parent_permlink );
+
+            if( parent != nullptr )
+            FUTUREPIA_ASSERT( parent->depth < FUTUREPIA_SOFT_MAX_COMMENT_DEPTH,
+               chain::plugin_exception,
+               "Comment is nested ${x} posts deep, maximum depth is ${y}.", ("x",parent->depth)("y",FUTUREPIA_SOFT_MAX_COMMENT_DEPTH) );
+         }
+      }
+
       void operator()( const transfer_operation& o )const
       {
          if( o.memo.length() > 0 )
@@ -182,7 +195,7 @@ namespace detail
                         _db.get< account_authority_object, chain::by_account >( o.from ) );
       }
 
-      void operator()( const transfer_to_savings_operation& o )const
+      void operator()( const transfer_savings_operation& o )const
       {
          if( o.memo.length() > 0 )
             check_memo( o.memo,
@@ -190,13 +203,6 @@ namespace detail
                         _db.get< account_authority_object, chain::by_account >( o.from ) );
       }
 
-      void operator()( const transfer_from_savings_operation& o )const
-      {
-         if( o.memo.length() > 0 )
-            check_memo( o.memo,
-                        _db.get< account_object, chain::by_name >( o.from ),
-                        _db.get< account_authority_object, chain::by_account >( o.from ) );
-      }
    };
 
 
@@ -217,10 +223,11 @@ namespace detail
       {
          case operation::tag< custom_operation >::value:
          case operation::tag< custom_json_operation >::value:
+         case operation::tag< custom_json_hf2_operation >::value:
          case operation::tag< custom_binary_operation >::value:
          {
             flat_set< account_name_type > impacted;
-            app::operation_get_impacted_accounts( note.op, impacted );
+            app::operation_get_impacted_accounts( note.op, _self.database(), impacted );
 
             for( auto& account : impacted )
                if( db.is_producing() )

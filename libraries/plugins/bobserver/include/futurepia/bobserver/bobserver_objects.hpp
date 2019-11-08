@@ -19,9 +19,7 @@ enum bobserver_plugin_object_type
 
 enum bandwidth_type
 {
-   post,    ///< Rate limiting posting reward eligibility over time
-   forum,   ///< Rate limiting for all forum related actins
-   market   ///< Rate limiting for all other actions
+   post    ///< Rate limiting posting reward eligibility over time
 };
 
 class content_edit_lock_object : public object< content_edit_lock_object_type, content_edit_lock_object >
@@ -73,16 +71,6 @@ class reserve_ratio_object : public object< reserve_ratio_object_type, reserve_r
        *   happen every block.
        */
       int64_t    current_reserve_ratio = 1;
-
-      /**
-       * The maximum bandwidth the blockchain can support is:
-       *
-       *    max_bandwidth = maximum_block_size * FUTUREPIA_BANDWIDTH_AVERAGE_WINDOW_SECONDS / FUTUREPIA_BLOCK_INTERVAL
-       *
-       * The maximum virtual bandwidth is:
-       *
-       *    max_bandwidth * current_reserve_ratio
-       */
 };
 
 typedef oid< reserve_ratio_object > reserve_ratio_id_type;
@@ -111,7 +99,7 @@ typedef multi_index_container <
 
 } } // futurepia::bobserver
 
-FC_REFLECT_ENUM( futurepia::bobserver::bandwidth_type, (post)(forum)(market) )
+FC_REFLECT_ENUM( futurepia::bobserver::bandwidth_type, (post))
 
 
 FC_REFLECT( futurepia::bobserver::content_edit_lock_object,

@@ -192,8 +192,6 @@ namespace fc {
             static extended_private_key generate_master( const fc::string& seed );
             static extended_private_key generate_master( const char* seed, uint32_t seed_len );
 
-            // Oleg Andreev's blind signature scheme,
-            // see http://blog.oleganza.com/post/77474860538/blind-signatures
             public_key blind_public_key( const extended_public_key& bob, int i ) const;
             blinded_hash blind_hash( const fc::sha256& hash, int i ) const;
             blind_signature blind_sign( const blinded_hash& hash, int i ) const;

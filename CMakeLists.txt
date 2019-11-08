@@ -31,9 +31,6 @@ if (USE_PCH)
 endif(USE_PCH)
 
 list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/fc/CMakeModules" )
-list( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/fc/GitVersionGen" )
-include( GetGitRevisionDescription )
-get_git_head_revision( GIT_REFSPEC GIT_SHA2 )
 
 SET(BOOST_COMPONENTS)
 LIST(APPEND BOOST_COMPONENTS thread
@@ -49,16 +46,6 @@ LIST(APPEND BOOST_COMPONENTS thread
                              locale
                              coroutine)
 SET( Boost_USE_STATIC_LIBS ON CACHE STRING "ON or OFF" )
-
-OPTION( BUILD_FUTUREPIA_TESTNET "Build source for test network (ON OR OFF)" OFF )
-MESSAGE( STATUS "BUILD_FUTUREPIA_TESTNET: ${BUILD_FUTUREPIA_TESTNET}" )
-if( BUILD_FUTUREPIA_TESTNET  )
-  MESSAGE( STATUS "     " )
-  MESSAGE( STATUS "             CONFIGURING FOR TEST NET             " )
-  MESSAGE( STATUS "     " )
-  SET( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DIS_TEST_NET" )
-  SET( CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DIS_TEST_NET" )
-endif()
 
 OPTION( LOW_MEMORY_NODE "Build source for low memory node (ON OR OFF)" OFF )
 MESSAGE( STATUS "LOW_MEMORY_NODE: ${LOW_MEMORY_NODE}" )
@@ -224,7 +211,7 @@ set(CMAKE_INSTALL_PREFIX ${CMAKE_BINARY_DIR}/install)
 
 SET(CPACK_PACKAGE_DIRECTORY "${CMAKE_INSTALL_PREFIX}")
 set(CPACK_PACKAGE_NAME "futurepia")
-set(CPACK_PACKAGE_VENDOR "Futurepia, Inc.")
+set(CPACK_PACKAGE_VENDOR "SigmaChain")
 set(CPACK_PACKAGE_VERSION_MAJOR "${VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${VERSION_PATCH}")
@@ -259,11 +246,7 @@ endif(LINUX)
  include(CPack)
 endif(ENABLE_INSTALLER)
 
-if( BUILD_FUTUREPIA_TESTNET )
-  MESSAGE( STATUS "\n\n             CONFIGURED FOR TEST NETWORK             \n\n" )
-else()
-  MESSAGE( STATUS "\n\n             CONFIGURED FOR FPC NETWORK             \n\n" )
-endif()
+MESSAGE( STATUS "\n\n             CONFIGURED FOR TEST NETWORK             \n\n" )
 
 if( LOW_MEMORY_NODE )
   MESSAGE( STATUS "\n\n             CONFIGURED FOR LOW MEMORY NODE          \n\n" )

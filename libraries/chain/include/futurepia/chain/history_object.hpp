@@ -37,6 +37,7 @@ namespace futurepia { namespace chain {
 
    struct by_location;
    struct by_transaction_id;
+
    typedef multi_index_container<
       operation_object,
       indexed_by<

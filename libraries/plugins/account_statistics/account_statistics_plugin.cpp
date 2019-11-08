@@ -1,6 +1,7 @@
 #include <futurepia/account_statistics/account_statistics_api.hpp>
 
 #include <futurepia/chain/account_object.hpp>
+#include <futurepia/chain/comment_object.hpp>
 
 #include <futurepia/chain/database.hpp>
 

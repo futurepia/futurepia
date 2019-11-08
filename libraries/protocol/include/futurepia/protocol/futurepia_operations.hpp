@@ -13,9 +13,14 @@ namespace futurepia { namespace protocol {
       FC_ASSERT( is_valid_account_name( name ), "Account name ${n} is invalid", ("n", name) );
    }
 
+   inline void validate_permlink( const string& permlink )
+   {
+      FC_ASSERT( permlink.size() < FUTUREPIA_MAX_PERMLINK_LENGTH, "permlink is too long" );
+      FC_ASSERT( fc::is_utf8( permlink ), "permlink not formatted in UTF8" );
+   }
+
    struct account_create_operation : public base_operation
    {
-      asset             fee;
       account_name_type creator;
       account_name_type new_account_name;
       authority         owner;
@@ -27,26 +32,6 @@ namespace futurepia { namespace protocol {
       void validate()const;
       void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(creator); }
    };
-
-
-   struct account_create_with_delegation_operation : public base_operation
-   {
-      asset             fee;
-      asset             delegation;
-      account_name_type creator;
-      account_name_type new_account_name;
-      authority         owner;
-      authority         active;
-      authority         posting;
-      public_key_type   memo_key;
-      string            json_metadata;
-
-      extensions_type   extensions;
-
-      void validate()const;
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(creator); }
-   };
-
 
    struct account_update_operation : public base_operation
    {
@@ -66,57 +51,80 @@ namespace futurepia { namespace protocol {
       { if( !owner ) a.insert( account ); }
    };
 
-   struct beneficiary_route_type
+   struct comment_operation : public base_operation
    {
-      beneficiary_route_type() {}
-      beneficiary_route_type( const account_name_type& a, const uint16_t& w ) : account( a ), weight( w ){}
+      account_name_type parent_author;
+      string            parent_permlink;
 
-      account_name_type account;
-      uint16_t          weight;
+      account_name_type author;
+      string            permlink;
+      string            title;
+      string            body;
+      string            json_metadata;
 
-      // For use by std::sort such that the route is sorted first by name (ascending)
-      bool operator < ( const beneficiary_route_type& o )const { return account < o.account; }
-   };
-
-   struct comment_payout_beneficiaries
-   {
-      vector< beneficiary_route_type > beneficiaries;
+      int32_t           group_id; 
 
       void validate()const;
+      void get_required_posting_authorities( flat_set<account_name_type>& a )const{ a.insert(author); }
    };
 
-   typedef static_variant<
-            comment_payout_beneficiaries
-           > comment_options_extension;
-
-   typedef flat_set< comment_options_extension > comment_options_extensions_type;
-
-   struct challenge_authority_operation : public base_operation
+   /**
+    *  Authors of posts may not want all of the benefits that come from creating a post. This
+    *  operation allows authors to update properties associated with their post.
+    *
+    *  The percent_pia_snac may be decreased, but never increased
+    *
+    */
+   struct comment_betting_state_operation : public base_operation
    {
-      account_name_type challenger;
-      account_name_type challenged;
-      bool              require_owner = false;
-
+      account_name_type author;
+      string            permlink;
+      uint16_t          round_no;
+      bool              allow_betting = false;
+      
       void validate()const;
-
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(challenger); }
+      void get_required_posting_authorities( flat_set<account_name_type>& a )const{ a.insert(author); }
    };
 
-   struct prove_authority_operation : public base_operation
+   struct delete_comment_operation : public base_operation
    {
-      account_name_type challenged;
-      bool              require_owner = false;
+      account_name_type author;
+      string            permlink;
 
       void validate()const;
+      void get_required_posting_authorities( flat_set<account_name_type>& a )const{ a.insert(author); }
+   };
 
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ if( !require_owner ) a.insert(challenged); }
-      void get_required_owner_authorities( flat_set<account_name_type>& a )const{  if(  require_owner ) a.insert(challenged); }
+
+   struct comment_vote_operation : public base_operation
+   {
+      account_name_type    voter;
+      account_name_type    author;
+      string               permlink;
+      uint16_t             vote_type;
+      asset                voting_amount;
+
+      void validate()const;
+      void get_required_posting_authorities( flat_set<account_name_type>& a )const{ a.insert(voter); }
+   };
+
+   struct comment_betting_operation : public base_operation
+   {
+      account_name_type       bettor;
+      account_name_type       author;
+      string                  permlink;
+      uint16_t                round_no;
+      uint16_t                betting_type;
+      asset                   amount;
+
+      void validate()const;
+      void get_required_posting_authorities( flat_set< account_name_type >& a )const{ a.insert( bettor ); }
    };
 
    /**
     * @ingroup operations
     *
-    * @brief Transfers FPC from one account to another.
+    * @brief Transfers PIA from one account to another.
     */
    struct transfer_operation : public base_operation
    {
@@ -134,145 +142,42 @@ namespace futurepia { namespace protocol {
       void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(from); }
    };
 
-
    /**
-    *  The purpose of this operation is to enable someone to send money contingently to
-    *  another individual. The funds leave the *from* account and go into a temporary balance
-    *  where they are held until *from* releases it to *to* or *to* refunds it to *from*.
+    *  Users who wish to become a bobserver must pay a fee acceptable to
+    *  the current bobservers to apply for the position and allow voting
+    *  to begin.
     *
-    *  In the event of a dispute the *agent* can divide the funds between the to/from account.
-    *  Disputes can be raised any time before or on the dispute deadline time, after the escrow
-    *  has been approved by all parties.
+    *  If the owner isn't a bobserver they will become a bobserver.  Bobservers
+    *  are charged a fee equal to 1 weeks worth of bobserver pay which in
+    *  turn is derived from the current share supply.  The fee is
+    *  only applied if the owner is not already a bobserver.
     *
-    *  This operation only creates a proposed escrow transfer. Both the *agent* and *to* must
-    *  agree to the terms of the arrangement by approving the escrow.
-    *
-    *  The escrow agent is paid the fee on approval of all parties. It is up to the escrow agent
-    *  to determine the fee.
-    *
-    *  Escrow transactions are uniquely identified by 'from' and 'escrow_id', the 'escrow_id' is defined
-    *  by the sender.
+    *  If the block_signing_key is null then the bobserver is removed from
+    *  contention.  The network will pick the top 21 bobservers for
+    *  producing blocks.
     */
-   struct escrow_transfer_operation : public base_operation
+   struct bobserver_update_operation : public base_operation
    {
-      account_name_type from;
-      account_name_type to;
-      account_name_type agent;
-      uint32_t          escrow_id = 30;
-
-      asset             fpch_amount = asset( 0, FPCH_SYMBOL );
-      asset             futurepia_amount = asset( 0, FUTUREPIA_SYMBOL );
-      asset             fee;
-
-      time_point_sec    ratification_deadline;
-      time_point_sec    escrow_expiration;
-
-      string            json_meta;
+      account_name_type owner;
+      string            url;
+      public_key_type   block_signing_key;
 
       void validate()const;
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(from); }
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( owner ); }
    };
 
-
    /**
-    *  The agent and to accounts must approve an escrow transaction for it to be valid on
-    *  the blockchain. Once a part approves the escrow, the cannot revoke their approval.
-    *  Subsequent escrow approve operations, regardless of the approval, will be rejected.
+    * All accounts with a VFS can vote for or against any bobserver.
     */
-   struct escrow_approve_operation : public base_operation
+   struct account_bobserver_vote_operation : public base_operation
    {
-      account_name_type from;
-      account_name_type to;
-      account_name_type agent;
-      account_name_type who; // Either to or agent
-
-      uint32_t          escrow_id = 30;
+      account_name_type account;
+      account_name_type bobserver;
       bool              approve = true;
 
-      void validate()const;
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(who); }
+      void validate() const;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(account); }
    };
-
-
-   /**
-    *  If either the sender or receiver of an escrow payment has an issue, they can
-    *  raise it for dispute. Once a payment is in dispute, the agent has authority over
-    *  who gets what.
-    */
-   struct escrow_dispute_operation : public base_operation
-   {
-      account_name_type from;
-      account_name_type to;
-      account_name_type agent;
-      account_name_type who;
-
-      uint32_t          escrow_id = 30;
-
-      void validate()const;
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(who); }
-   };
-
-
-   /**
-    *  This operation can be used by anyone associated with the escrow transfer to
-    *  release funds if they have permission.
-    *
-    *  The permission scheme is as follows:
-    *  If there is no dispute and escrow has not expired, either party can release funds to the other.
-    *  If escrow expires and there is no dispute, either party can release funds to either party.
-    *  If there is a dispute regardless of expiration, the agent can release funds to either party
-    *     following whichever agreement was in place between the parties.
-    */
-   struct escrow_release_operation : public base_operation
-   {
-      account_name_type from;
-      account_name_type to; ///< the original 'to'
-      account_name_type agent;
-      account_name_type who; ///< the account that is attempting to release the funds, determines valid 'receiver'
-      account_name_type receiver; ///< the account that should receive funds (might be from, might be to)
-
-      uint32_t          escrow_id = 30;
-      asset             fpch_amount = asset( 0, FPCH_SYMBOL ); ///< the amount of fpch to release
-      asset             futurepia_amount = asset( 0, FUTUREPIA_SYMBOL ); ///< the amount of futurepia to release
-
-      void validate()const;
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(who); }
-   };
-
-
-
-   /**
-    * BObservers must vote on how to set certain chain properties to ensure a smooth
-    * and well functioning network.  Any time @owner is in the active set of bobservers these
-    * properties will be used to control the blockchain configuration.
-    */
-   struct chain_properties
-   {
-      /**
-       *  This fee, paid in FPC, is converted into VESTING SHARES for the new account. Accounts
-       *  without vesting shares cannot earn usage rations and therefore are powerless. This minimum
-       *  fee requires all accounts to have some kind of commitment to the network that includes the
-       *  ability to vote and make transactions.
-       */
-      asset             account_creation_fee =
-         asset( FUTUREPIA_MIN_ACCOUNT_CREATION_FEE, FUTUREPIA_SYMBOL );
-
-      /**
-       *  This bobservers vote for the maximum_block_size which is used by the network
-       *  to tune rate limiting and capacity
-       */
-      uint32_t          maximum_block_size = FUTUREPIA_MIN_BLOCK_SIZE_LIMIT * 2;
-      uint16_t          fpch_interest_rate  = FUTUREPIA_DEFAULT_FPCH_INTEREST_RATE;
-
-      void validate()const
-      {
-         FC_ASSERT( account_creation_fee.amount >= FUTUREPIA_MIN_ACCOUNT_CREATION_FEE);
-         FC_ASSERT( maximum_block_size >= FUTUREPIA_MIN_BLOCK_SIZE_LIMIT);
-         FC_ASSERT( fpch_interest_rate >= 0 );
-         FC_ASSERT( fpch_interest_rate <= FUTUREPIA_100_PERCENT );
-      }
-   };
-
 
    /**
     * @brief provides a generic way to add higher level protocols on top of bobserver consensus
@@ -306,6 +211,21 @@ namespace futurepia { namespace protocol {
       void get_required_posting_authorities( flat_set<account_name_type>& a )const{ for( const auto& i : required_posting_auths ) a.insert(i); }
    };
 
+   struct custom_json_hf2_operation : public base_operation
+   {
+      flat_set< account_name_type > required_owner_auths;
+      flat_set< account_name_type > required_active_auths;
+      flat_set< account_name_type > required_posting_auths;
+      vector< authority >           required_auths;
+      string                        id; ///< must be less than 32 characters long
+      string                        json; ///< must be proper utf8 / JSON string.
+
+      void validate()const;
+      void get_required_owner_authorities( flat_set<account_name_type>& a )const{ for( const auto& i : required_owner_auths ) a.insert(i); }
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ for( const auto& i : required_active_auths ) a.insert(i); }
+      void get_required_posting_authorities( flat_set<account_name_type>& a )const{ for( const auto& i : required_posting_auths ) a.insert(i); }
+      void get_required_authorities( vector< authority >& a )const{ for( const auto& i : required_auths ) a.push_back( i ); }
+   };
 
    struct custom_binary_operation : public base_operation
    {
@@ -324,204 +244,39 @@ namespace futurepia { namespace protocol {
       void get_required_authorities( vector< authority >& a )const{ for( const auto& i : required_auths ) a.push_back( i ); }
    };
 
-
    /**
-    *  Feeds can only be published by the top N bobservers which are included in every round and are
-    *  used to define the exchange rate between futurepia and the dollar.
-    */
-   struct feed_publish_operation : public base_operation
-   {
-      account_name_type publisher;
-      price             exchange_rate;
-
-      void  validate()const;
-      void  get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(publisher); }
-   };
-
-
-   /**
-    *  This operation instructs the blockchain to start a conversion between FPC and FPCH,
-    *  The funds are deposited after FUTUREPIA_CONVERSION_DELAY
+    *  This operation instructs the blockchain to start a conversion between PIA and SNAC,
     */
    struct convert_operation : public base_operation
    {
       account_name_type owner;
-      uint32_t          requestid = 0;
       asset             amount;
 
       void  validate()const;
       void  get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(owner); }
    };
 
-
    /**
-    * This operation creates a limit order and matches it against existing open orders.
+    *  This operation instructs the blockchain to start a conversion between PIA and SNAC,
     */
-   struct limit_order_create_operation : public base_operation
+   struct exchange_operation : public base_operation
    {
       account_name_type owner;
-      uint32_t          orderid = 0; /// an ID assigned by owner, must be unique
-      asset             amount_to_sell;
-      asset             min_to_receive;
-      bool              fill_or_kill = false;
-      time_point_sec    expiration = time_point_sec::maximum();
-
-      void  validate()const;
-      void  get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(owner); }
-
-      price             get_price()const { return amount_to_sell / min_to_receive; }
-
-      pair< asset_symbol_type, asset_symbol_type > get_market()const
-      {
-         return amount_to_sell.symbol < min_to_receive.symbol ?
-                std::make_pair(amount_to_sell.symbol, min_to_receive.symbol) :
-                std::make_pair(min_to_receive.symbol, amount_to_sell.symbol);
-      }
-   };
-
-
-   /**
-    *  This operation is identical to limit_order_create except it serializes the price rather
-    *  than calculating it from other fields.
-    */
-   struct limit_order_create2_operation : public base_operation
-   {
-      account_name_type owner;
-      uint32_t          orderid = 0; /// an ID assigned by owner, must be unique
-      asset             amount_to_sell;
-      bool              fill_or_kill = false;
-      price             exchange_rate;
-      time_point_sec    expiration = time_point_sec::maximum();
-
-      void  validate()const;
-      void  get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(owner); }
-
-      price             get_price()const { return exchange_rate; }
-
-      pair< asset_symbol_type, asset_symbol_type > get_market()const
-      {
-         return exchange_rate.base.symbol < exchange_rate.quote.symbol ?
-                std::make_pair(exchange_rate.base.symbol, exchange_rate.quote.symbol) :
-                std::make_pair(exchange_rate.quote.symbol, exchange_rate.base.symbol);
-      }
-   };
-
-
-   /**
-    *  Cancels an order and returns the balance to owner.
-    */
-   struct limit_order_cancel_operation : public base_operation
-   {
-      account_name_type owner;
-      uint32_t          orderid = 0;
+      asset             amount;
+      uint32_t          request_id = 0;
 
       void  validate()const;
       void  get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(owner); }
    };
 
-
-   struct pow
+   struct cancel_exchange_operation : public base_operation
    {
-      public_key_type worker;
-      digest_type     input;
-      signature_type  signature;
-      digest_type     work;
+      account_name_type owner;
+      uint32_t          request_id = 0;
 
-      void create( const fc::ecc::private_key& w, const digest_type& i );
-      void validate()const;
+      void  validate()const;
+      void  get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(owner); }
    };
-
-
-   struct pow_operation : public base_operation
-   {
-      account_name_type worker_account;
-      block_id_type     block_id;
-      uint64_t          nonce = 0;
-      pow               work;
-      chain_properties  props;
-
-      void validate()const;
-      fc::sha256 work_input()const;
-
-      const account_name_type& get_worker_account()const { return worker_account; }
-
-      /** there is no need to verify authority, the proof of work is sufficient */
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{  }
-   };
-
-
-   struct pow2_input
-   {
-      account_name_type worker_account;
-      block_id_type     prev_block;
-      uint64_t          nonce = 0;
-   };
-
-
-   struct pow2
-   {
-      pow2_input        input;
-      uint32_t          pow_summary = 0;
-
-      void create( const block_id_type& prev_block, const account_name_type& account_name, uint64_t nonce );
-      void validate()const;
-   };
-
-   struct equihash_pow
-   {
-      pow2_input           input;
-      fc::equihash::proof  proof;
-      block_id_type        prev_block;
-      uint32_t             pow_summary = 0;
-
-      void create( const block_id_type& recent_block, const account_name_type& account_name, uint32_t nonce );
-      void validate() const;
-   };
-
-   typedef fc::static_variant< pow2, equihash_pow > pow2_work;
-
-   struct pow2_operation : public base_operation
-   {
-      pow2_work                     work;
-      optional< public_key_type >   new_owner_key;
-      chain_properties              props;
-
-      void validate()const;
-
-      void get_required_active_authorities( flat_set<account_name_type>& a )const;
-
-      void get_required_authorities( vector< authority >& a )const
-      {
-         if( new_owner_key )
-         {
-            a.push_back( authority( 1, *new_owner_key, 1 ) );
-         }
-      }
-   };
-
-
-   /**
-    * This operation is used to report a miner who signs two blocks
-    * at the same time. To be valid, the violation must be reported within
-    * FUTUREPIA_MAX_BOBSERVERS blocks of the head block (1 round) and the
-    * producer must be in the ACTIVE bobserver set.
-    *
-    * Users not in the ACTIVE bobserver set should not have to worry about their
-    * key getting compromised and being used to produced multiple blocks so
-    * the attacker can report it and steel their vesting futurepia.
-    *
-    * The result of the operation is to transfer the full VESTING FPC balance
-    * of the block producer to the reporter.
-    */
-   struct report_over_production_operation : public base_operation
-   {
-      account_name_type    reporter;
-      signed_block_header  first_block;
-      signed_block_header  second_block;
-
-      void validate()const;
-   };
-
 
    /**
     * All account recovery requests come from a listed recovery account. This
@@ -689,30 +444,23 @@ namespace futurepia { namespace protocol {
    };
 
 
-   struct transfer_to_savings_operation : public base_operation {
-      account_name_type from;
-      account_name_type to;
-      asset             amount;
-      string            memo;
-
-      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( from ); }
-      void validate() const;
-   };
-
-
-   struct transfer_from_savings_operation : public base_operation {
+   struct transfer_savings_operation : public base_operation {
       account_name_type from;
       uint32_t          request_id = 0;
       account_name_type to;
       asset             amount;
+      asset             total_amount;
+      uint8_t           split_pay_order = 0;
+      uint8_t           split_pay_month = 0;
       string            memo;
+      time_point_sec    complete;
 
       void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( from ); }
       void validate() const;
    };
 
 
-   struct cancel_transfer_from_savings_operation : public base_operation {
+   struct cancel_transfer_savings_operation : public base_operation {
       account_name_type from;
       uint32_t          request_id = 0;
 
@@ -720,6 +468,13 @@ namespace futurepia { namespace protocol {
       void validate() const;
    };
 
+   struct conclusion_transfer_savings_operation : public base_operation {
+      account_name_type from;
+      uint32_t          request_id = 0;
+
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( from ); }
+      void validate() const;
+   };
 
    struct decline_voting_rights_operation : public base_operation
    {
@@ -730,42 +485,102 @@ namespace futurepia { namespace protocol {
       void validate() const;
    };
 
-   struct claim_reward_balance_operation : public base_operation
+   struct account_bproducer_appointment_operation : public base_operation
+   {
+      account_name_type bobserver;
+      bool              approve = true;
+
+      void validate() const;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(bobserver); }
+   };
+
+   struct except_bobserver_operation : public base_operation
+   {
+      account_name_type bobserver;
+
+      void validate() const;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert(bobserver); }
+   };
+
+   struct print_operation : public base_operation
    {
       account_name_type account;
-      asset             reward_futurepia;
-      asset             reward_fpch;
+      asset             amount;
 
-      void get_required_posting_authorities( flat_set< account_name_type >& a )const{ a.insert( account ); }
+      void  validate()const;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( account ); }
+   };
+   
+   struct burn_operation : public base_operation
+   {
+      account_name_type account;
+      asset             amount;
+
+      void  validate()const;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( account ); }
+   };
+
+   struct exchange_rate_operation : public base_operation
+   {
+      account_name_type owner;
+      price             rate;
+
+      void  validate()const;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( owner ); }
+   }; 
+   
+   struct staking_fund_operation : public base_operation {
+      account_name_type from;
+      string            fund_name;
+      uint32_t          request_id = 0;
+      asset             amount;
+      string            memo;
+      uint8_t           usertype = 0;
+      uint8_t           month = 0;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( from ); }
       void validate() const;
+   };
+
+   struct conclusion_staking_operation : public base_operation {
+      account_name_type from;
+      string            fund_name;
+      uint32_t          request_id = 0;
+
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( from ); }
+      void validate() const;
+   };
+
+   struct transfer_fund_operation : public base_operation
+   {
+      account_name_type from;
+      string            fund_name;
+      asset             amount;
+      string            memo;
+      void              validate()const;
+      void get_required_active_authorities( flat_set<account_name_type>& a )const{ a.insert( from ); }
+   };
+
+   struct set_fund_interest_operation : public base_operation
+   {
+      string            fund_name;
+      uint8_t           usertype = 0;
+      uint8_t           month = 0;
+      string            percent_interest;
    };
 
 } } // futurepia::protocol
 
-
-FC_REFLECT( futurepia::protocol::transfer_to_savings_operation, (from)(to)(amount)(memo) )
-FC_REFLECT( futurepia::protocol::transfer_from_savings_operation, (from)(request_id)(to)(amount)(memo) )
-FC_REFLECT( futurepia::protocol::cancel_transfer_from_savings_operation, (from)(request_id) )
+FC_REFLECT( futurepia::protocol::transfer_savings_operation, (from)(request_id)(to)(amount)(total_amount)(split_pay_order)(split_pay_month)(memo)(complete) )
+FC_REFLECT( futurepia::protocol::cancel_transfer_savings_operation, (from)(request_id) )
+FC_REFLECT( futurepia::protocol::conclusion_transfer_savings_operation, (from)(request_id) )
 
 FC_REFLECT( futurepia::protocol::reset_account_operation, (reset_account)(account_to_reset)(new_owner_authority) )
 FC_REFLECT( futurepia::protocol::set_reset_account_operation, (account)(current_reset_account)(reset_account) )
-
-
-FC_REFLECT( futurepia::protocol::report_over_production_operation, (reporter)(first_block)(second_block) )
-FC_REFLECT( futurepia::protocol::convert_operation, (owner)(requestid)(amount) )
-FC_REFLECT( futurepia::protocol::feed_publish_operation, (publisher)(exchange_rate) )
-FC_REFLECT( futurepia::protocol::pow, (worker)(input)(signature)(work) )
-FC_REFLECT( futurepia::protocol::pow2, (input)(pow_summary) )
-FC_REFLECT( futurepia::protocol::pow2_input, (worker_account)(prev_block)(nonce) )
-FC_REFLECT( futurepia::protocol::equihash_pow, (input)(proof)(prev_block)(pow_summary) )
-FC_REFLECT( futurepia::protocol::chain_properties, (account_creation_fee)(maximum_block_size)(fpch_interest_rate) );
-
-FC_REFLECT_TYPENAME( futurepia::protocol::pow2_work )
-FC_REFLECT( futurepia::protocol::pow_operation, (worker_account)(block_id)(nonce)(work)(props) )
-FC_REFLECT( futurepia::protocol::pow2_operation, (work)(new_owner_key)(props) )
+FC_REFLECT( futurepia::protocol::convert_operation, (owner)(amount) )
+FC_REFLECT( futurepia::protocol::exchange_operation, (owner)(amount)(request_id) )
+FC_REFLECT( futurepia::protocol::cancel_exchange_operation, (owner)(request_id) )
 
 FC_REFLECT( futurepia::protocol::account_create_operation,
-            (fee)
             (creator)
             (new_account_name)
             (owner)
@@ -773,18 +588,6 @@ FC_REFLECT( futurepia::protocol::account_create_operation,
             (posting)
             (memo_key)
             (json_metadata) )
-
-FC_REFLECT( futurepia::protocol::account_create_with_delegation_operation,
-            (fee)
-            (delegation)
-            (creator)
-            (new_account_name)
-            (owner)
-            (active)
-            (posting)
-            (memo_key)
-            (json_metadata)
-            (extensions) )
 
 FC_REFLECT( futurepia::protocol::account_update_operation,
             (account)
@@ -795,25 +598,27 @@ FC_REFLECT( futurepia::protocol::account_update_operation,
             (json_metadata) )
 
 FC_REFLECT( futurepia::protocol::transfer_operation, (from)(to)(amount)(memo) )
+FC_REFLECT( futurepia::protocol::bobserver_update_operation, (owner)(url)(block_signing_key) )
+FC_REFLECT( futurepia::protocol::account_bobserver_vote_operation, (account)(bobserver)(approve) )
+FC_REFLECT( futurepia::protocol::comment_operation, (parent_author)(parent_permlink)(author)(permlink)(title)(body)(json_metadata)(group_id) )
+FC_REFLECT( futurepia::protocol::comment_vote_operation, (voter)(author)(permlink)(vote_type)(voting_amount) )
+FC_REFLECT( futurepia::protocol::comment_betting_operation, (bettor)(author)(permlink)(round_no)(betting_type)(amount) )
 FC_REFLECT( futurepia::protocol::custom_operation, (required_auths)(id)(data) )
 FC_REFLECT( futurepia::protocol::custom_json_operation, (required_auths)(required_posting_auths)(id)(json) )
+FC_REFLECT( futurepia::protocol::custom_json_hf2_operation, (required_owner_auths)(required_active_auths)(required_posting_auths)(required_auths)(id)(json) )
 FC_REFLECT( futurepia::protocol::custom_binary_operation, (required_owner_auths)(required_active_auths)(required_posting_auths)(required_auths)(id)(data) )
-FC_REFLECT( futurepia::protocol::limit_order_create_operation, (owner)(orderid)(amount_to_sell)(min_to_receive)(fill_or_kill)(expiration) )
-FC_REFLECT( futurepia::protocol::limit_order_create2_operation, (owner)(orderid)(amount_to_sell)(exchange_rate)(fill_or_kill)(expiration) )
-FC_REFLECT( futurepia::protocol::limit_order_cancel_operation, (owner)(orderid) )
-
-FC_REFLECT( futurepia::protocol::beneficiary_route_type, (account)(weight) )
-FC_REFLECT( futurepia::protocol::comment_payout_beneficiaries, (beneficiaries) )
-FC_REFLECT_TYPENAME( futurepia::protocol::comment_options_extension )
-
-FC_REFLECT( futurepia::protocol::escrow_transfer_operation, (from)(to)(fpch_amount)(futurepia_amount)(escrow_id)(agent)(fee)(json_meta)(ratification_deadline)(escrow_expiration) );
-FC_REFLECT( futurepia::protocol::escrow_approve_operation, (from)(to)(agent)(who)(escrow_id)(approve) );
-FC_REFLECT( futurepia::protocol::escrow_dispute_operation, (from)(to)(agent)(who)(escrow_id) );
-FC_REFLECT( futurepia::protocol::escrow_release_operation, (from)(to)(agent)(who)(receiver)(escrow_id)(fpch_amount)(futurepia_amount) );
-FC_REFLECT( futurepia::protocol::challenge_authority_operation, (challenger)(challenged)(require_owner) );
-FC_REFLECT( futurepia::protocol::prove_authority_operation, (challenged)(require_owner) );
+FC_REFLECT( futurepia::protocol::delete_comment_operation, (author)(permlink) );
+FC_REFLECT( futurepia::protocol::comment_betting_state_operation, (author)(permlink)(round_no)(allow_betting) )
 FC_REFLECT( futurepia::protocol::request_account_recovery_operation, (recovery_account)(account_to_recover)(new_owner_authority)(extensions) );
 FC_REFLECT( futurepia::protocol::recover_account_operation, (account_to_recover)(new_owner_authority)(recent_owner_authority)(extensions) );
 FC_REFLECT( futurepia::protocol::change_recovery_account_operation, (account_to_recover)(new_recovery_account)(extensions) );
 FC_REFLECT( futurepia::protocol::decline_voting_rights_operation, (account)(decline) );
-FC_REFLECT( futurepia::protocol::claim_reward_balance_operation, (account)(reward_futurepia)(reward_fpch) )
+FC_REFLECT( futurepia::protocol::account_bproducer_appointment_operation, (bobserver)(approve) )
+FC_REFLECT( futurepia::protocol::except_bobserver_operation, (bobserver) )
+FC_REFLECT( futurepia::protocol::print_operation, (account)(amount) )
+FC_REFLECT( futurepia::protocol::burn_operation, (account)(amount) )
+FC_REFLECT( futurepia::protocol::exchange_rate_operation, (owner)(rate) )
+FC_REFLECT( futurepia::protocol::staking_fund_operation, (from)(fund_name)(request_id)(amount)(memo)(usertype)(month) )
+FC_REFLECT( futurepia::protocol::conclusion_staking_operation, (from)(fund_name)(request_id) )
+FC_REFLECT( futurepia::protocol::transfer_fund_operation, (from)(fund_name)(amount)(memo) )
+FC_REFLECT( futurepia::protocol::set_fund_interest_operation, (fund_name)(usertype)(month)(percent_interest) )

@@ -7,6 +7,8 @@
 #include <futurepia/chain/futurepia_object_types.hpp>
 #include <futurepia/chain/history_object.hpp>
 
+#include <futurepia/tags/tags_plugin.hpp>
+#include <futurepia/dapp/dapp_plugin.hpp>
 #include <futurepia/bobserver/bobserver_plugin.hpp>
 
 #include <fc/api.hpp>
@@ -22,26 +24,14 @@
 #include <memory>
 #include <vector>
 
+#include <futurepia/dapp/dapp_api.hpp>
+
 namespace futurepia { namespace app {
 
 using namespace futurepia::chain;
 using namespace futurepia::protocol;
 using namespace std;
-
-struct order
-{
-   price                order_price;
-   double               real_price; // dollars per futurepia
-   share_type           futurepia;
-   share_type           fpch;
-   fc::time_point_sec   created;
-};
-
-struct order_book
-{
-   vector< order >      asks;
-   vector< order >      bids;
-};
+using futurepia::dapp::dapp_discussion;
 
 struct api_context;
 
@@ -51,14 +41,25 @@ struct scheduled_hardfork
    fc::time_point_sec   live_time;
 };
 
-struct liquidity_balance
-{
-   string               account;
-   fc::uint128_t        weight;
-};
-
-
 class database_api_impl;
+
+/**
+ *  Defines the arguments to a query as a struct so it can be easily extended
+ */
+struct discussion_query {
+   void validate()const{
+      FC_ASSERT( limit <= 100 );
+   }
+
+   optional< string >   tag;
+   uint32_t             limit = 0;
+   uint32_t             truncate_body = 0; ///< the number of bytes of the post body to return, 0 for all
+   optional< string >   start_author;
+   optional< string >   start_permlink;
+   optional< string >   parent_author;
+   optional< string >   parent_permlink;
+   int32_t              group_id = -1;    ///< Group id, this is 0 or greater than 0. However 0 is main feed else is group feed 
+};
 
 /**
  * @brief The database_api class implements the RPC API for the chain database.
@@ -86,7 +87,6 @@ class database_api
       state get_state( string path )const;
 
       vector< account_name_type > get_active_bobservers()const;
-      vector< account_name_type > get_miner_queue()const;
 
       /////////////////////////////
       // Blocks and transactions //
@@ -132,12 +132,13 @@ class database_api
        * @brief Retrieve the current @ref dynamic_global_property_object
        */
       dynamic_global_property_api_obj  get_dynamic_global_properties()const;
-      chain_properties                 get_chain_properties()const;
-      price                            get_current_median_history_price()const;
-      feed_history_api_obj             get_feed_history()const;
       bobserver_schedule_api_obj       get_bobserver_schedule()const;
       hardfork_version                 get_hardfork_version()const;
       scheduled_hardfork               get_next_scheduled_hardfork()const;
+      common_fund_api_obj              get_common_fund( string name )const;
+
+      //fund
+      dapp_reward_fund_api_object      get_dapp_reward_fund() const;
 
       //////////
       // Keys //
@@ -179,13 +180,16 @@ class database_api
       uint64_t get_account_count()const;
 
       vector< owner_authority_history_api_obj > get_owner_history( string account )const;
-
       optional< account_recovery_request_api_obj > get_recovery_request( string account ) const;
-
-      optional< escrow_api_obj > get_escrow( string from, uint32_t escrow_id )const;
 
       vector< savings_withdraw_api_obj > get_savings_withdraw_from( string account )const;
       vector< savings_withdraw_api_obj > get_savings_withdraw_to( string account )const;
+
+      vector< fund_withdraw_api_obj > get_fund_withdraw_from( string fund_name, string account )const;
+      vector< fund_withdraw_api_obj > get_fund_withdraw_list( string fund_name, uint32_t limit )const;
+
+      vector< exchange_withdraw_api_obj > get_exchange_withdraw_from( string account )const;
+      vector< exchange_withdraw_api_obj > get_exchange_withdraw_list( uint32_t limit )const;
 
       ///////////////
       // Bobservers //
@@ -199,8 +203,6 @@ class database_api
        * This function has semantics identical to @ref get_objects
        */
       vector<optional<bobserver_api_obj>> get_bobservers(const vector<bobserver_id_type>& bobserver_ids)const;
-
-      vector<convert_request_api_obj> get_conversion_requests( const string& account_name )const;
 
       /**
        * @brief Get the bobserver owned by a given account
@@ -225,27 +227,19 @@ class database_api
       set<account_name_type> lookup_bobserver_accounts(const string& lower_bound_name, uint32_t limit)const;
 
       /**
+       * Get names of registered BP(block producer)
+       * @param lower_bound_name Lower bound of the first name to return
+       * @param limit Maximum number of results to return -- must not exceed 1000
+       * @return set of BP names
+       * */
+      set< account_name_type > lookup_bproducer_accounts( const string& lower_bound_name, uint32_t limit )const;
+
+      /**
        * @brief Get the total number of bobservers registered with the blockchain
        */
       uint64_t get_bobserver_count()const;
-
-      ////////////
-      // Market //
-      ////////////
-
-      /**
-       * @breif Gets the current order book for FPC:FPCH market
-       * @param limit Maximum number of orders for each side of the spread to return -- Must not exceed 1000
-       */
-      order_book get_order_book( uint32_t limit = 1000 )const;
-      vector<extended_limit_order> get_open_orders( string owner )const;
-
-      /**
-       * @breif Gets the current liquidity reward queue.
-       * @param start_account The account to start the list from, or "" to get the head of the queue
-       * @param limit Maxmimum number of accounts to return -- Must not exceed 1000
-       */
-      vector< liquidity_balance > get_liquidity_queue( string start_account, uint32_t limit = 1000 )const;
+      
+      bool has_hardfork( uint32_t hardfork )const;
 
       ////////////////////////////
       // Authority / validation //
@@ -278,27 +272,102 @@ class database_api
        */
       bool           verify_account_authority( const string& name_or_id, const flat_set<public_key_type>& signers )const;
 
-      ///@}
+      /**
+       * fetch betting state of a comment
+       * @param author author of a comment
+       * @param permlink permlink of al comment
+       * */
+      vector< betting_state > get_betting_state( string author, string permlink ) const;
 
       /**
-       *  For each of these filters:
-       *     Get root content...
-       *     Get any content...
-       *     Get root content in category..
-       *     Get any content in category...
-       *
-       *  Return discussions
-       *     Total Discussion Pending Payout
-       *     Last Discussion Update (or reply)... think
-       *     Top Discussions by Total Payout
-       *
-       *  Return content (comments)
-       *     Pending Payout Amount
-       *     Pending Payout Time
-       *     Creation Date
-       *
+       * Get all voter of a comment.
+       * @param author author
+       * @param permlink permlink if permlink is "" then it will return all votes for author
+       * @param type LIKE or DISLIKE. refer to enum comment_vote_type.
        */
-      ///@{
+      vector<vote_api_object> get_active_votes( string author, string permlink, comment_vote_type type )const;
+      
+      /**
+       * Get author/permlink of all comments that an account has voted for
+       * @param voter voter account.
+       * */
+      vector<account_vote_api_object> get_account_votes( string voter )const;
+
+      /**
+       * Get all bettings of a comment.
+       * @param author author
+       * @param permlink permlink if permlink is "" then it will return all votes for author
+       * @param type betting type. RECOMMEND or BETTING. refer to enum comment_betting_type
+       */
+      vector< bet_api_object > get_active_bettings( string author, string permlink, comment_betting_type type )const;
+      
+      /**
+       * Get author/permlink of all comments that an account bet.
+       * @param bettor betting acount.
+       * */
+      vector< account_bet_api_object > get_account_bettings( string bettor )const;
+
+      /**
+       * Get bettings of a round.
+       * @param round_no Round No.
+       * */
+      vector< round_bet_api_object > get_round_bettings( uint16_t round_no )const;
+
+      /**
+       * get content
+       * */
+      discussion           get_content( string author, string permlink )const;
+
+      /**
+       * get replies of a content
+       * @param parent author of parent content
+       * @param parent_permlink permlink of parent content
+       * */
+      vector<discussion>   get_content_replies( string parent, string parent_permlink )const;
+
+      /**
+       * get contents by created time in each groups or main.
+       * @param query searching conditions. (@see discussion_query)
+       * */
+      vector<discussion> get_discussions_by_created( const discussion_query& query )const;
+
+      /**
+       * get replies by author in the latest update time order
+       * @param query searching conditions. use start_author in discussion_query. (@see discussion_query)
+       * */
+      vector<discussion> get_replies_by_author( const discussion_query& query )const;
+
+      /**
+       * get contents by tag.
+       * @param query searching conditions. use tag in discussion_query. (@see discussion_query)
+       * */
+      vector<discussion> get_discussions_by_tag( const discussion_query& query )const;
+
+      /**
+       * get contents that is blocked.
+       * @param query searching conditions @see discussion_query
+       * */
+      vector<discussion> get_blocked_discussions( const discussion_query& query ) const;
+
+      /**
+       * fetch recent replies from all comments(feeds) that an account write, in the latest order.
+       * @param account author account of comments
+       * @param start_author for paging. author of start reply in next page. 
+       *       If this and start_permlink are empty string, fetch from the first reply.
+       * @param start_permlink for paging. permlink of start reply in next page.
+       *       If this and start_author are empty string, fetch from the first reply.
+       * @param limit count of replies that get at once
+       * */
+      vector<discussion> get_replies_by_last_update( const account_name_type account
+         , const account_name_type start_author, const string start_permlink, const uint32_t limit )const;
+
+      /**
+       *  This method is used to fetch all posts/comments by start_author that occur after before_date and start_permlink with up to limit being returned.
+       *
+       *  If start_permlink is empty then only before_date will be considered. If both are specified the eariler to the two metrics will be used. This
+       *  should allow easy pagination.
+       */
+      vector<discussion>   get_discussions_by_author_before_date( string author, string start_permlink, time_point_sec before_date, uint32_t limit )const;
 
       /**
        *  Account operations have sequence numbers from 0 to N where N is the most recent operation. This method
@@ -309,25 +378,85 @@ class database_api
        */
       map<uint32_t, applied_operation> get_account_history( string account, uint64_t from, uint32_t limit )const;
 
+      vector< operation > get_history_by_opname( string account, string op_name )const; 
+
+      /**
+       * get PIA rank list
+       * @param limit Maximum number of results to return -- must not exceed 1000
+       * @return PIA rank list. If some accounts has same PIA balance, is displayed accounts in the order of registration.
+       */
+      vector< account_balance_api_obj > get_pia_rank( int limit ) const;
+
+      /**
+       * get SNAC rank list
+       * @param limit Maximum number of results to return -- must not exceed 1000
+       * @return SNAC rank list. If some accounts has same SNAC balance, is displayed accounts in the order of registration.
+       */
+      vector< account_balance_api_obj > get_snac_rank( int limit ) const;
+
       ////////////////////////////
       // Handlers - not exposed //
       ////////////////////////////
       void on_api_startup();
 
    private:
+      discussion get_discussion( comment_id_type, uint32_t truncate_body = 0 )const;
+
+      static bool filter_default( const comment_api_obj& c ) { return false; }
+      static bool exit_default( const comment_api_obj& c )   { return false; }
+      static bool tag_exit_default( const tags::comment_tag_object& c ) { return false; }
+
+      template<typename Index, typename StartItr>
+      vector<discussion> get_discussions( const discussion_query& query,
+                                          const Index& comment_idx, 
+                                          StartItr comment_itr,
+                                          const std::function< bool( const comment_api_obj& ) >& filter = &database_api::filter_default,
+                                          const std::function< bool( const comment_api_obj& ) >& exit   = &database_api::exit_default,
+                                          bool ignore_parent = false
+                                        )const;
+
+      template<typename Index, typename StartItr>
+      vector<discussion> get_tag_discussions( const discussion_query& q,
+                                             const Index& idx, 
+                                             StartItr itr,
+                                             const std::function< bool( const comment_api_obj& ) >& filter = &database_api::filter_default,
+                                             const std::function< bool( const comment_api_obj& ) >& exit   = &database_api::exit_default,
+                                             const std::function< bool( const tags::comment_tag_object& ) >& tag_exit = &database_api::tag_exit_default,
+                                             bool ignore_parent = false
+                                             )const;
+      comment_id_type get_parent( const discussion_query& q )const;
+
+      void recursively_fetch_content( state& _state, discussion& root, set<string>& referenced_accounts )const;
+      void recursively_fetch_dapp_content( state& _state, dapp_discussion& root, set<string>& referenced_accounts )const;
+
       std::shared_ptr< database_api_impl >   my;
 };
 
 } }
 
-FC_REFLECT( futurepia::app::order, (order_price)(real_price)(futurepia)(fpch)(created) );
-FC_REFLECT( futurepia::app::order_book, (asks)(bids) );
 FC_REFLECT( futurepia::app::scheduled_hardfork, (hf_version)(live_time) );
-FC_REFLECT( futurepia::app::liquidity_balance, (account)(weight) );
+
+FC_REFLECT( futurepia::app::discussion_query, 
+   (tag)
+   (truncate_body)
+   (start_author)
+   (start_permlink)
+   (parent_author)
+   (parent_permlink)
+   (limit)
+   (group_id) 
+);
 
 FC_API(futurepia::app::database_api,
    // Subscriptions
    (set_block_applied_callback)
+
+   (get_discussions_by_created)
+   (get_replies_by_author)
+   (get_blocked_discussions)
+
+   // tags
+   (get_discussions_by_tag)
 
    // Blocks and transactions
    (get_block_header)
@@ -338,12 +467,12 @@ FC_API(futurepia::app::database_api,
    // Globals
    (get_config)
    (get_dynamic_global_properties)
-   (get_chain_properties)
-   (get_feed_history)
-   (get_current_median_history_price)
    (get_bobserver_schedule)
    (get_hardfork_version)
    (get_next_scheduled_hardfork)
+   (get_common_fund)
+   //fund
+   (get_dapp_reward_fund)
 
    // Keys
    (get_key_references)
@@ -354,18 +483,24 @@ FC_API(futurepia::app::database_api,
    (lookup_account_names)
    (lookup_accounts)
    (get_account_count)
-   (get_conversion_requests)
    (get_account_history)
+   (get_history_by_opname) 
    (get_owner_history)
    (get_recovery_request)
-   (get_escrow)
-   (get_savings_withdraw_from)
+   (get_pia_rank)
+   (get_snac_rank)
+
+   // transfer_savings
+   (get_savings_withdraw_from)  
    (get_savings_withdraw_to)
 
-   // Market
-   (get_order_book)
-   (get_open_orders)
-   (get_liquidity_queue)
+   // staking
+   (get_fund_withdraw_from)
+   (get_fund_withdraw_list)
+
+   // exchange
+   (get_exchange_withdraw_from)
+   (get_exchange_withdraw_list)
 
    // Authority / validation
    (get_transaction_hex)
@@ -375,12 +510,29 @@ FC_API(futurepia::app::database_api,
    (verify_authority)
    (verify_account_authority)
 
-   // BObservers
+   // votes
+   (get_active_votes)
+   (get_account_votes)
+
+   // betting
+   (get_active_bettings)
+   (get_account_bettings)
+   (get_round_bettings)
+   (get_betting_state)
+
+   // content
+   (get_content)
+   (get_content_replies)
+   (get_discussions_by_author_before_date)
+   (get_replies_by_last_update)
+
+   // Bobservers
    (get_bobservers)
    (get_bobserver_by_account)
    (get_bobservers_by_vote)
    (lookup_bobserver_accounts)
    (get_bobserver_count)
    (get_active_bobservers)
-   (get_miner_queue)
+   (lookup_bproducer_accounts)
+   (has_hardfork)
 )

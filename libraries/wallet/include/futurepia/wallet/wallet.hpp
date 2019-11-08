@@ -3,6 +3,8 @@
 #include <futurepia/app/api.hpp>
 #include <futurepia/private_message/private_message_plugin.hpp>
 #include <futurepia/token/token_api.hpp>
+#include <futurepia/dapp/dapp_api.hpp>
+#include <futurepia/dapp_history/dapp_history_api.hpp>
 #include <futurepia/app/futurepia_api_objects.hpp>
 
 #include <graphene/utilities/key_conversion.hpp>
@@ -17,8 +19,13 @@ using namespace std;
 
 namespace futurepia { namespace wallet {
 
+using futurepia::app::discussion;
+using protocol::comment_vote_type;
+using protocol::comment_betting_type;
 using namespace futurepia::private_message;
 using namespace futurepia::token;
+using namespace futurepia::dapp;
+using namespace futurepia::dapp_history;
 
 typedef uint16_t transaction_handle_type;
 
@@ -74,6 +81,11 @@ enum authority_type
    posting
 };
 
+struct creating_dapp_result {
+   annotated_signed_transaction trx;
+   string                       dapp_key;
+};
+
 namespace detail {
 class wallet_api_impl;
 }
@@ -116,7 +128,7 @@ class wallet_api
        *
        * @returns Public block data on the blockchain
        */
-      optional<signed_block_api_obj>    get_block( uint32_t num );
+      optional<signed_block_api_obj>      get_block( uint32_t num );
 
       /** Returns sequence of operations included/generated in a specified block
        *
@@ -125,21 +137,10 @@ class wallet_api
        */
       vector<applied_operation>           get_ops_in_block( uint32_t block_num, bool only_virtual = true );
 
-      /** Return the current price feed history
-       *
-       * @returns Price feed history data on the blockchain
-       */
-      feed_history_api_obj                 get_feed_history()const;
-
       /**
        * Returns the list of bobservers producing blocks in the current round (21 Blocks)
        */
-      vector<account_name_type>                      get_active_bobservers()const;
-
-      /**
-       * Returns the queue of pow miners waiting to produce blocks.
-       */
-      vector<account_name_type>                      get_miner_queue()const;
+      vector<account_name_type>           get_active_bobservers()const;
 
       /**
        * Returns the state info associated with the URL
@@ -149,7 +150,7 @@ class wallet_api
       /**
        *  Gets the account information for all accounts for which this wallet has a private key
        */
-      vector<account_api_obj>              list_my_accounts();
+      vector<account_api_obj>             list_my_accounts();
 
       /** Lists all accounts registered in the blockchain.
        * This returns a list of all account names and their account ids, sorted by account name.
@@ -369,51 +370,7 @@ class wallet_api
                                             public_key_type memo,
                                             bool broadcast )const;
 
-      /**
-       *  This method will genrate new owner, active, and memo keys for the new account which
-       *  will be controlable by this wallet. There is a fee associated with account creation
-       *  that is paid by the creator. The current account creation fee can be found with the
-       *  'info' wallet command.
-       *
-       *  These accounts are created with combination of FPC and delegated SP
-       *
-       *  @param creator The account creating the new account
-       *  @param futurepia_fee The amount of the fee to be paid with FPC
-       *  @param new_account_name The name of the new account
-       *  @param json_meta JSON Metadata associated with the new account
-       *  @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction create_account_delegated( string creator, asset futurepia_fee, string new_account_name, string json_meta, bool broadcast );
-
-      /**
-       * This method is used by faucets to create new accounts for other users which must
-       * provide their desired keys. The resulting account may not be controllable by this
-       * wallet. There is a fee associated with account creation that is paid by the creator.
-       * The current account creation fee can be found with the 'info' wallet command.
-       *
-       * These accounts are created with combination of FPC and delegated SP
-       *
-       * @param creator The account creating the new account
-       * @param futurepia_fee The amount of the fee to be paid with FPC
-       * @param newname The name of the new account
-       * @param json_meta JSON Metadata associated with the new account
-       * @param owner public owner key of the new account
-       * @param active public active key of the new account
-       * @param posting public posting key of the new account
-       * @param memo public memo key of the new account
-       * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction create_account_with_keys_delegated( string creator,
-                                            asset futurepia_fee,
-                                            string newname,
-                                            string json_meta,
-                                            public_key_type owner,
-                                            public_key_type active,
-                                            public_key_type posting,
-                                            public_key_type memo,
-                                            bool broadcast )const;
-
-      /**
+       /**
        * This method updates the keys of an existing account.
        *
        * @param accountname The name of the account
@@ -513,164 +470,87 @@ class wallet_api
        */
       set<account_name_type>       list_bobservers(const string& lowerbound, uint32_t limit);
 
+      /**
+       * Lists account names of all BP(block producer) registered in the blockchain.
+       * @param lowerbound the name of the first BP to return.  If the named BP does not exist,
+       *                   the list will start at the BP that comes after \c lowerbound
+       * @param limit the maximum number of BP to return (max: 1000)
+       * @returns a list of BP names
+       * */
+      set< account_name_type > list_bproducers( const string& lowerbound, uint32_t limit );
+
       /** Returns information about the given bobserver.
        * @param owner_account the name or id of the bobserver account owner, or the id of the bobserver
        * @returns the information about the bobserver stored in the block chain
        */
       optional< bobserver_api_obj > get_bobserver(string owner_account);
 
-      /** Returns conversion requests by an account
+      /**
+       * Update a bobserver object owned by the given account.
        *
-       * @param owner Account name of the account owning the requests
-       *
-       * @returns All pending conversion requests by account
+       * @param bobserver_name The name of the bobserver account.
+       * @param url A URL containing some information about the bobserver.  The empty string makes it remain the same.
+       * @param block_signing_key The new block signing public key.  The empty string disables block production.
+       * @param except If true, this is excepted from creating block.
+       * @param broadcast true if you wish to broadcast the transaction.
        */
-      vector<convert_request_api_obj> get_conversion_requests( string owner );
-
+      annotated_signed_transaction update_bobserver(string bobserver_name,
+                                        string url,
+                                        public_key_type block_signing_key,
+                                        bool broadcast = false);
 
       /**
-       * Transfer funds from one account to another. FPC and FPCH can be transferred.
+       * Transfer funds from one account to another. PIA and SNAC can be transferred.
        *
        * @param from The account the funds are coming from
        * @param to The account the funds are going to
-       * @param amount The funds being transferred. i.e. "100.000 FPC"
+       * @param amount The funds being transferred. i.e. "100.000 PIA"
        * @param memo A memo for the transactionm, encrypted with the to account's public memo key
        * @param broadcast true if you wish to broadcast the transaction
        */
       annotated_signed_transaction transfer(string from, string to, asset amount, string memo, bool broadcast = false);
 
       /**
-       * Transfer funds from one account to another using escrow. FPC and FPCH can be transferred.
-       *
-       * @param from The account the funds are coming from
-       * @param to The account the funds are going to
-       * @param agent The account acting as the agent in case of dispute
-       * @param escrow_id A unique id for the escrow transfer. (from, escrow_id) must be a unique pair
-       * @param fpch_amount The amount of FPCH to transfer
-       * @param futurepia_amount The amount of FPC to transfer
-       * @param fee The fee paid to the agent
-       * @param ratification_deadline The deadline for 'to' and 'agent' to approve the escrow transfer
-       * @param escrow_expiration The expiration of the escrow transfer, after which either party can claim the funds
-       * @param json_meta JSON encoded meta data
-       * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction escrow_transfer(
-         string from,
-         string to,
-         string agent,
-         uint32_t escrow_id,
-         asset fpch_amount,
-         asset futurepia_amount,
-         asset fee,
-         time_point_sec ratification_deadline,
-         time_point_sec escrow_expiration,
-         string json_meta,
-         bool broadcast = false
-      );
-
-      /**
-       * Approve a proposed escrow transfer. Funds cannot be released until after approval. This is in lieu of requiring
-       * multi-sig on escrow_transfer
-       *
-       * @param from The account that funded the escrow
-       * @param to The destination of the escrow
-       * @param agent The account acting as the agent in case of dispute
-       * @param who The account approving the escrow transfer (either 'to' or 'agent)
-       * @param escrow_id A unique id for the escrow transfer
-       * @param approve true to approve the escrow transfer, otherwise cancels it and refunds 'from'
-       * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction escrow_approve(
-         string from,
-         string to,
-         string agent,
-         string who,
-         uint32_t escrow_id,
-         bool approve,
-         bool broadcast = false
-      );
-
-      /**
-       * Raise a dispute on the escrow transfer before it expires
-       *
-       * @param from The account that funded the escrow
-       * @param to The destination of the escrow
-       * @param agent The account acting as the agent in case of dispute
-       * @param who The account raising the dispute (either 'from' or 'to')
-       * @param escrow_id A unique id for the escrow transfer
-       * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction escrow_dispute(
-         string from,
-         string to,
-         string agent,
-         string who,
-         uint32_t escrow_id,
-         bool broadcast = false
-      );
-
-      /**
-       * Release funds help in escrow
-       *
-       * @param from The account that funded the escrow
-       * @param to The account the funds are originally going to
-       * @param agent The account acting as the agent in case of dispute
-       * @param who The account authorizing the release
-       * @param receiver The account that will receive funds being released
-       * @param escrow_id A unique id for the escrow transfer
-       * @param fpch_amount The amount of FPCH that will be released
-       * @param futurepia_amount The amount of FPC that will be released
-       * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction escrow_release(
-         string from,
-         string to,
-         string agent,
-         string who,
-         string receiver,
-         uint32_t escrow_id,
-         asset fpch_amount,
-         asset futurepia_amount,
-         bool broadcast = false
-      );
-
-
-      /**
-       *  Transfers into savings happen immediately, transfers from savings take 72 hours
-       */
-      annotated_signed_transaction transfer_to_savings( string from, string to, asset amount, string memo, bool broadcast = false );
-
-      /**
        * @param request_id - an unique ID assigned by from account, the id is used to cancel the operation and can be reused after the transfer completes
        */
-      annotated_signed_transaction transfer_from_savings( string from, uint32_t request_id, string to, asset amount, string memo, bool broadcast = false );
+      annotated_signed_transaction transfer_savings( string from, uint32_t request_id, string to, asset amount, uint8_t split_pay_month, string memo, string date, bool broadcast = false );
 
       /**
-       *  @param request_id the id used in transfer_from_savings
+       *  @param request_id the id used in transfer_savings
        *  @param from the account that initiated the transfer
        */
-      annotated_signed_transaction cancel_transfer_from_savings( string from, uint32_t request_id, bool broadcast = false );
-
+      annotated_signed_transaction cancel_transfer_savings( string from, uint32_t request_id, bool broadcast = false );
 
       /**
-       *  This method will convert FPCH to FPC at the current_median_history price one
-       *  week from the time it is executed. This method depends upon there being a valid price feed.
-       *
-       *  @param from The account requesting conversion of its FPCH i.e. "1.000 FPCH"
-       *  @param amount The amount of FPCH to convert
-       *  @param broadcast true if you wish to broadcast the transaction
+       *  @param request_id the id used in transfer_savings
+       *  @param from the account that initiated the transfer
        */
-      annotated_signed_transaction convert_fpch( string from, asset amount, bool broadcast = false );
+      annotated_signed_transaction conclusion_transfer_savings( string from, uint32_t request_id, bool broadcast = false );
 
       /**
-       * A bobserver can public a price feed for the FPC:FPCH market. The median price feed is used
-       * to process conversion requests from FPCH to FPC.
-       *
-       * @param bobserver The bobserver publishing the price feed
-       * @param exchange_rate The desired exchange rate
+       * convert coin
+       * @param from account name
+       * @param amount amount of coin to be converted
        * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction publish_feed(string bobserver, price exchange_rate, bool broadcast );
+       * */
+      annotated_signed_transaction convert( string from, asset amount, bool broadcast = false );
+
+      /**
+       * exchange coin
+       * @param from account name
+       * @param amount amount of coin to be converted
+       * @param request_id the id used in exchange
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction exchange(string from, asset amount, uint32_t request_id, bool broadcast );
+
+      /**
+       * cancel exchanging coin
+       * @param from account name
+       * @param request_id the id used in exchange
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction cancel_exchange(string from, uint32_t request_id, bool broadcast );
 
       /** Signs a transaction.
        *
@@ -704,34 +584,92 @@ class wallet_api
       vector< variant > network_get_connected_peers();
 
       /**
-       * Gets the current order book for FPC:FPCH
-       *
-       * @param limit Maximum number of orders to return for bids and asks. Max is 1000.
-       */
-      order_book  get_order_book( uint32_t limit = 1000 );
-      vector<extended_limit_order>  get_open_orders( string accountname );
-
-      /**
-       *  Creates a limit order at the price amount_to_sell / min_to_receive and will deduct amount_to_sell from account
-       *
-       *  @param owner The name of the account creating the order
-       *  @param order_id is a unique identifier assigned by the creator of the order, it can be reused after the order has been filled
-       *  @param amount_to_sell The amount of either FPCH or FPC you wish to sell
-       *  @param min_to_receive The amount of the other asset you will receive at a minimum
-       *  @param fill_or_kill true if you want the order to be killed if it cannot immediately be filled
-       *  @param expiration the time the order should expire if it has not been filled
+       *  Post or update a comment(feed).
+       * 
+       *  @param group_id Group id, this is 0 or greater than 0. However 0 is main feed else is group feed.
+       *  @param author the name of the account authoring the comment
+       *  @param permlink the accountwide unique permlink for the comment
+       *  @param parent_author can be null if this is a top level comment
+       *  @param parent_permlink becomes category if parent_author is ""
+       *  @param title the title of the comment
+       *  @param body the body of the comment
+       *  @param json the json metadata of the comment
        *  @param broadcast true if you wish to broadcast the transaction
        */
-      annotated_signed_transaction create_order( string owner, uint32_t order_id, asset amount_to_sell, asset min_to_receive, bool fill_or_kill, uint32_t expiration, bool broadcast );
+      annotated_signed_transaction post_comment( int group_id, string author, string permlink, string parent_author, string parent_permlink
+         , string title, string body, string json, bool broadcast );
+
 
       /**
-       * Cancel an order created with create_order
+       *  Delete a comment(feed).
+       * 
+       *  @param author the name of the account authoring the comment
+       *  @param permlink the accountwide unique permlink for the comment
+       *  @param broadcast true if you wish to broadcast the transaction
+       */
+      annotated_signed_transaction delete_comment( string author, string permlink, bool broadcast );
+
+      /**
+       * vote a comment(feed) as good
        *
-       * @param owner The name of the account owning the order to cancel_order
-       * @param orderid The unique identifier assigned to the order by its creator
+       * @param voter The account voting
+       * @param author The author of the comment to be voted on
+       * @param permlink The permlink of the comment to be voted on. (author, permlink) is a unique pair
+       * @param amount reward amount that voter send to author.
        * @param broadcast true if you wish to broadcast the transaction
        */
-      annotated_signed_transaction cancel_order( string owner, uint32_t orderid, bool broadcast );
+      annotated_signed_transaction like_comment( string voter, string author, string permlink, asset amount, bool broadcast );
+
+      /**
+       * vote a comment(feed) in a disgust
+       *
+       * @param voter The account voting
+       * @param author The author of the comment to be voted on
+       * @param permlink The permlink of the comment to be voted on. (author, permlink) is a unique pair
+       * @param amount reward amount that voter send to author.
+       * @param broadcast true if you wish to broadcast the transaction
+       */
+      annotated_signed_transaction dislike_comment( string voter, string author, string permlink, asset amount, bool broadcast );
+
+      /**
+       * recommend to best a comment(feed).
+       * @param bettor Bettor account name
+       * @param author The author of the comment to be voted on
+       * @param permlink The permlink of the comment to be voted on. (author, permlink) is a unique pair
+       * @param round_no Round no of betting
+       * @param amount reward amount that voter send to author.
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction recommend_comment( string bettor, string author, string permlink, uint16_t round_no, asset amount, bool broadcast );
+
+      /**
+       * @param bettor Bettor account name
+       * @param author The author of the comment to be bet
+       * @param permlink The permlink of the comment to be bet. (author, permlink) is a unique pair
+       * @param round_no Round no of betting
+       * @param amount betting amount
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction bet_comment( string bettor, string author, string permlink, uint16_t round_no, asset amount, bool broadcast );
+
+      /**
+       * update betting state of comment.
+       * @param author The author of the comment to be voted on.
+       * @param permlink The permlink of the comment to be voted on. (author, permlink) is a unique pair in comments.
+       * @param round_no Round No of betting.
+       * @param broadcast true if you wish to broadcast the transaction.
+       * */
+      annotated_signed_transaction create_comment_betting_state( string author, string permlink, uint16_t round_no, bool broadcast );
+
+      /**
+       * update betting state of comment.
+       * @param author The author of the comment to be voted on.
+       * @param permlink The permlink of the comment to be voted on. (author, permlink) is a unique pair in comments.
+       * @param round_no Round No of betting.
+       * @param allow_betting set on whether allow betting. 
+       * @param broadcast true if you wish to broadcast the transaction.
+       * */
+      annotated_signed_transaction update_comment_betting_state( string author, string permlink, uint16_t round_no, bool allow_betting, bool broadcast );
 
       /**
        *  send private message
@@ -767,16 +705,6 @@ class wallet_api
        * Sets the amount of time in the future until a transaction expires.
        */
       void set_transaction_expiration(uint32_t seconds);
-
-      /**
-       * Challenge a user's authority. The challenger pays a fee to the challenged which is depositted as
-       * Futurepia Power. Until the challenged proves their active key, all posting rights are revoked.
-       *
-       * @param challenger The account issuing the challenge
-       * @param challenged The account being challenged
-       * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction challenge( string challenger, string challenged, bool broadcast );
 
       /**
        * Create an account recovery request as a recover account. The syntax for this command contains a serialized authority object
@@ -816,15 +744,6 @@ class wallet_api
       vector< owner_authority_history_api_obj > get_owner_history( string account )const;
 
       /**
-       * Prove an account's active authority, fulfilling a challenge, restoring posting rights, and making
-       * the account immune to challenge for 24 hours.
-       *
-       * @param challenged The account that was challenged and is proving its authority.
-       * @param broadcast true if you wish to broadcast the transaction
-       */
-      annotated_signed_transaction prove( string challenged, bool broadcast );
-
-      /**
        *  Account operations have sequence numbers from 0 to N where N is the most recent operation. This method
        *  returns operations in the range [from-limit, from]
        *
@@ -833,15 +752,8 @@ class wallet_api
        *  @param limit - the maximum number of items that can be queried (0 to 1000], must be less than from
        */
       map<uint32_t,applied_operation> get_account_history( string account, uint32_t from, uint32_t limit );
-
-
-      /**
-       *  Marks one account as following another account.  Requires the posting authority of the follower.
-       *
-       *  @param what - a set of things to follow: posts, comments, votes, ignore
-       */
-      annotated_signed_transaction follow( string follower, string following, set<string> what, bool broadcast );
-
+      
+      vector< operation > get_history_by_opname( string account, string op_name )const; 
 
       std::map<string,std::function<string(fc::variant,const fc::variants&)>> get_result_formatters() const;
 
@@ -864,20 +776,43 @@ class wallet_api
        */
       string decrypt_memo( string memo );
 
-      annotated_signed_transaction decline_voting_rights( string account, bool decline, bool broadcast );
-
-      annotated_signed_transaction claim_reward_balance( string account, asset reward_futurepia, asset reward_fpch, bool broadcast );
+      /**
+       * appoitment block observer(BO) to block producer(BP)
+       * @param bobserver block observer
+       * @param approve if true, set BP, else unset
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction appointment_to_bproducer( string bobserver,
+                                          bool approve = true,
+                                          bool broadcast = false);
 
       /**
-       *  This method will genrate new token. 
-       *
+       * except to block observer(BO)
+       * @param bobserver block observer
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction except_to_bobserver( string bobserver,
+                                          bool broadcast = false);
+
+      /**
+       *  This method generate new token. 
+       *  @param dapp_name name of dapp.
        *  @param creator The account creating new token
        *  @param token_name The name of new token
        *  @param symbol symbol using new token
        *  @param init_supply initial token supply amount
        *  @param broadcast true if you wish to broadcast the transaction
        */
-      annotated_signed_transaction create_token( string creator, string token_name, string symbol, int64_t init_supply, bool broadcast );
+      annotated_signed_transaction create_token( string dapp_name, string creator, string token_name, string symbol, int64_t init_supply, bool broadcast );
+
+      /**
+       *  This method issue token.
+       *  @param token_name The name of reissued token
+       *  @param token_publisher The publisher account of reissed token
+       *  @param amount reissuing amount
+       *  @param broadcast true if you wish to broadcast the transaction
+       */
+      annotated_signed_transaction issue_token( string token_name, string token_publisher, asset amount, bool broadcast );
 
       /** 
        * Returns the information about token
@@ -919,12 +854,423 @@ class wallet_api
        * */
       annotated_signed_transaction burn_token( string account, asset amount, bool broadcast );
 
-    /**
-     * get accounts by token name.
-     * @param token_name token name.
-     * @return accounts owned the token.
-     * */
-    vector< token_balance_api_object > get_accounts_by_token( string token_name );
+      /**
+       * get accounts by token name.
+       * @param token_name token name.
+       * @return accounts owned the token.
+       * */
+      vector< token_balance_api_object > get_accounts_by_token( string token_name );
+
+      /**
+       * get token list by dapp name
+       * @param dapp_name dapp name
+       * @return token list owned the dapp
+       * */
+      vector< token_api_object > get_tokens_by_dapp( string dapp_name );
+
+      /**
+       * set interest ratio of token staking according months.
+       * can't do staking of months that don't set interest ratio.
+       * @param publisher token publisher account
+       * @param token token name
+       * @param months staking months
+       * @param interest_rate interest ration. Unit is %.
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction set_token_staking_interest( string publisher, string token, uint8_t months, string interest_rate, bool broadcast );
+
+      /**
+       * setup token fund
+       * @param publisher token publisher account
+       * @param token token name
+       * @param fund_name fund name
+       * @param init_fund_balance Initial fund balances(amount). 0 is possbile.
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction setup_token_fund( string publisher, string token, string fund_name, asset init_fund_balance, bool broadcast );
+
+      /**
+       * transfer token to a fund.
+       * @param from remitter account
+       * @param token token name
+       * @param fund_name name of fund(receiver)
+       * @param amount remittance amount.
+       * @param memo 
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction transfer_token_fund( string from, string token, string fund_name, asset amount, string memo, bool broadcast );
+
+      /**
+       * staking token fund.
+       * @param from account
+       * @param token token name
+       * @param fund_name fund_name
+       * @param request_id unique id. 
+       *  A account can do staking many times to same token, in this case, need 'request id' for distinguishing each staking.
+       * @param amount amount for staking.
+       * @param memo 
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction staking_token_fund( string from, string token, string fund_name, uint32_t request_id
+         , asset amount, string memo, uint8_t months, bool broadcast );
+
+      /**
+       * get token staking list of a account.
+       * @param account
+       * @param token token name
+       * @return all staking list fo a account.
+       * */
+      vector< token_fund_withdraw_api_obj > get_token_staking_list( string account, string token );
+
+      /**
+       * get token fund withdraw list of a token
+       * @param token token name
+       * @param fund fund name
+       * @param account account search keyword. optional. If you want first item, should put empty string("").
+       * @param req_id request id search keyword. If account is empty string, should put 0.
+       * @param limit max count of withdraw list getting at once. limit is 1000 or less.
+       * @return fund withdraw list of a token
+       * */
+      vector< token_fund_withdraw_api_obj > list_token_fund_withdraw ( string token, string fund, string account, int req_id, uint32_t limit );
+
+      /**
+       * get token fund details
+       * @param token token name
+       * @param fund fund name
+       * @return token fund details.
+       * */
+      optional< token_fund_api_obj > get_token_fund( string token, string fund );
+
+      /**
+       * get token staking interest ratio list
+       * @param token token name
+       * @return token staking interest ratio list
+       * */
+      vector< token_staking_interest_api_obj > get_token_staking_interest( string token );
+
+      /**
+       * transfer token savings
+       * @param from sender account
+       * @param to receiver account
+       * @param token token name
+       * @param request_id unique id. 
+       *  A account can transfer token savings many times to same token, in this case, need 'request id' for distinguishing each transfer.
+       * @param amount amount transfering
+       * @param split_pay_month If split transfer, this is split transfer count (Unit is month). In case of no split, this is 0.
+       * @param memo 
+       * @param next_date a next date to transfer a token to a receiver. In case of no split, this is complete date.
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction transfer_token_savings( string from, string to, string token, uint32_t request_id
+         , asset amount, uint8_t split_pay_month, string memo, string next_date, bool broadcast );
+
+      /**
+       * cancel to transfer token savings
+       * @param token token name
+       * @param from sender account
+       * @param to receiver account
+       * @param request_id unique id. 
+       *  A account can transfer token savings many times to same token, in this case, need 'request id' for distinguishing each transfer.
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction cancel_transfer_token_savings( string token, string from, string to, uint32_t request_id, bool broadcast );
+
+      /**
+       * conclude transfer token savings
+       * @param token token name
+       * @param from sender account
+       * @param to receiver account
+       * @param request_id unique id. 
+       *  A account can transfer token savings many times to same token, in this case, need 'request id' for distinguishing each transfer.
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction conclude_transfer_token_savings( string token, string from, string to, uint32_t request_id, bool broadcast );
+
+      /**
+       * get token saving withdraws of sender.
+       * @param token token name
+       * @param from sender account.
+       * @return token saving withdraw list.
+       * */
+      vector< token_savings_withdraw_api_obj > get_token_savings_withdraw_from( string token, string from );
+
+      /**
+       * get token saving withdraws of receiver.
+       * @param token token name
+       * @param to receiver
+       * @return token saving withdraw list.
+       * */
+      vector< token_savings_withdraw_api_obj > get_token_savings_withdraw_to( string token, string to );
+
+      /**
+       * get token saving withdraw list of a token
+       * @param token token name
+       * @param from sender search keyword. optional. If you want first item, should put empty string("").
+       * @param to sender search keyword. optional. If you from is empty string, this should be empth string.
+       * @param req_id request id search keyword. If from is empty string, should put 0.
+       * @param limit max count of withdraw list getting at once. limit is 1000 or less.
+       * @return fund withdraw list of a token
+       * */
+      vector< token_savings_withdraw_api_obj > list_token_savings_withdraw( string token, string from, string to, int req_id, int limit );
+
+      /**
+       * create a dapp.
+       * @param owner owner name of dapp
+       * @param name dapp name
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      creating_dapp_result create_dapp ( string owner, string name, bool broadcast );
+
+      /**
+       * issue a key of specific dapp again.
+       * @param owner owner name of dapp
+       * @param name dapp name
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      creating_dapp_result reissue_dapp_key ( string owner, string name, bool broadcast );
+
+      /**
+       * get list of dapps
+       * @param lower_bound_name search keyword
+       * @param limit max count to read from db. limit is 100 or less.
+       * @return list of dapps
+       * */
+      vector< dapp_api_object > list_dapps( string lower_bound_name, uint32_t limit );
+
+      /**
+       * get dapp information.
+       * @param dapp_name dapp name to get dapp information.
+       * @return dapp information.
+       * */
+      optional< dapp_api_object > get_dapp( string dapp_name );
+
+      /**
+       * get list of dapps owned by an owner
+       * @param owner owner name
+       * @return list of dapps
+       * */
+      vector< dapp_api_object > get_dapps_by_owner( string owner );
+
+      /**
+       * post a comment for a dapp
+       * @param dapp_name dapp name
+       * @param author the name of the account authoring the comment
+       * @param permlink the accountwide unique permlink for the comment
+       * @param parent_author can be null if this is a top level comment
+       * @param parent_permlink becomes category if parent_author is ""
+       * @param title
+       * @param body
+       * @param json the json metadata of the comment
+       * @param broadcast true if you wish to broadcast the transaction
+       * @return annotated_signed_transaction
+       * */
+      annotated_signed_transaction post_dapp_comment( string dapp_name, string author, string permlink, string parent_author, string parent_permlink, string title, string body, string json, bool broadcast );
+
+      /**
+       * vote a comment for a dapp
+       * @param dapp_name dapp name
+       * @param voter the name of the account voting this comment
+       * @param author the name of the account authoring the comment
+       * @param permlink the accountwide unique permlink for the comment
+       * @param vote_type vote type. Currently, only LIKE and DISLIKE are possbile. 
+       *        LIKE is 11, DISLIKE is 12.
+       * @param broadcast true if you wish to broadcast the transaction   
+       * @return annotated_signed_transaction
+       * */
+      annotated_signed_transaction vote_dapp_comment( string dapp_name, string voter, string author, string permlink, uint16_t vote_type, bool broadcast );
+
+      /**
+       * delete a comment for a dapp
+       * @param dapp_name dapp name
+       * @param author the name of the account authoring the comment
+       * @param permlink the accountwide unique permlink for the comment
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction delete_dapp_comment( string dapp_name, string author, string permlink, bool broadcast );
+
+      /**
+       * get dapp comment
+       * @param dapp_name dapp name
+       * @param author the name of the account authoring the comment
+       * @param permlink the accountwide unique permlink for the comment
+       * @return dapp comment
+       * */
+      optional< dapp_discussion > get_dapp_content( string dapp_name, string author, string permlink );
+
+      /**
+       * get replies of a dapp comment
+       * @param dapp_name dapp name
+       * @param author the name of the account authoring the comment
+       * @param permlink the accountwide unique permlink for the comment
+       * @return reply list
+       * */
+      vector<dapp_discussion> get_dapp_content_replies( string dapp_name, string author, string permlink );
+
+      /**
+       * get dapp content list
+       * @param dapp_name dapp name.
+       * @param last_author author of last content of previous page (for paging). 
+       *        This is optional, in case of first page, is empty string.
+       * @param last_permlink permlink of last content of previous page (for paging). 
+       *        This is optional, in case of first page, is empty string.
+       * @param limit max count of searched contnents. 
+       *        This should be greater than 0, and equal 100 or less than.
+       * @return contents of dapp.
+       * */
+      vector< dapp_discussion > list_dapp_contents( string dapp_name, string last_author, string last_permlink, uint32_t limit );
+
+      /**
+       * join dapp
+       * @param dapp_name dapp name
+       * @param account_name account name
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction join_dapp( string dapp_name, string account_name, bool broadcast );
+
+      /**
+       * leave dapp
+       * @param dapp_name dapp name
+       * @param account_name account name
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction leave_dapp( string dapp_name, string account_name, bool broadcast );
+
+      /**
+       * Vote for a dapp approval or rejection. Only BP can vote.
+       * @param voter voter id.
+       * @param dapp_name dapp name.
+       * @param vote_type only APPROVAL(102) or REJECTION(103)
+       * @param broadcast true if you wish to broadcast the transaction
+       * */
+      annotated_signed_transaction vote_dapp ( string voter, string dapp_name, uint8_t vote_type, bool broadcast );
+
+      /**
+       * Vote for transaction fee of DApp. Only BP can vote. And fee is available to use only SNAC.
+       * @param voter voter id. BP
+       * @param fee transaction fee. It should be SNAC.
+       * @param broadcast true if you wish to broadcast the transaction.
+       * */
+      annotated_signed_transaction vote_dapp_transaction_fee ( string voter, asset fee, bool broadcast );
+
+      /**
+       * get dapp content list
+       * @param dapp_name dapp name.
+       * @param lower_bound_name search keyword for user account.
+       * @param limit max count of searched users. 
+       *        This should be greater than 0, and equal 1000 or less than.
+       * @return contents of dapp.
+       * */
+      vector< dapp_user_api_object > list_dapp_users ( string dapp_name, string lower_bound_name, uint32_t limit );
+
+      /**
+       * get list of dapp that a account join
+       * @param account_name account name.
+       * @return dapp list.
+       * */
+      vector< dapp_user_api_object > get_join_dapps( string account_name );
+
+      /**
+       * get list of dapp vote.
+       * @param dapp_name dapp name.
+       * @return list of vote about a dapp.
+       * */
+      vector< dapp_vote_api_object > get_dapp_votes( string dapp_name );
+
+      /**
+       *  dapp operations have sequence numbers from 0 to N where N is the most recent operation. This method
+       *  returns operations in the range [from-limit, from]
+       *  @param dapp_name - dapp name
+       *  @param from - the absolute sequence number, -1 means most recent, limit is the number of operations before from.
+       *  @param limit - the maximum number of items that can be queried (0 to 1000], must be less than from
+       */
+      map< uint32_t, applied_operation > get_dapp_history( string dapp_name, uint64_t from, uint32_t limit );
+      
+      /**
+       *  get transfer savings list by to account
+       *  @param account - account name
+       */
+      vector< savings_withdraw_api_obj > get_transfer_savings_to( string account );
+
+      /**
+       *  get transfer savings list by from account
+       *  @param account - account name
+       */
+      vector< savings_withdraw_api_obj > get_transfer_savings_from( string account );     
+
+      /**
+       *  get staking fund list by from account
+       *  @param fund_name - fund name
+       *  @param account - account name
+       */
+      vector< fund_withdraw_api_obj > get_staking_fund_from( string fund_name, string account );
+
+      /**
+       *  get staking fund total list 
+       *  @param fund_name - fund name
+       *  @param limit - 1 to 1000
+       */
+      vector< fund_withdraw_api_obj > get_staking_fund_list( string fund_name, uint32_t limit );
+      
+      /**
+       *  set exchange rate by bproducer
+       *  @param owner - bproducer
+       *  @param rate - pia to snac or snac to pia exchange rate
+       */
+      annotated_signed_transaction set_exchange_rate(string owner, price rate, bool broadcast );
+
+      /**
+       *  get exchange by from account
+       *  @param account - account name
+       */
+      vector< exchange_withdraw_api_obj > get_exchange_from( string account );
+
+      /**
+       *  get exchange total list
+       *  @param limit - 1 to 1000
+       */
+      vector< exchange_withdraw_api_obj > get_exchange_list( uint32_t limit );
+      
+      /**
+       *  fund infomation
+       *  @param name - fund name
+       */
+      variant fund_info(string name);
+	  
+      /**
+       * statking fund
+       * @param from
+       * @param fund_name
+       * @param request_id
+       * @param amount
+       * @param memo
+       * @param usertype
+       * @param month
+       * @param broadcast true if you wish to broadcast the transaction
+       */
+      annotated_signed_transaction staking_fund( string from, string fund_name, uint32_t request_id, asset amount, string memo, uint8_t usertype, uint8_t month, bool broadcast );
+      
+      /**
+       *  transfer fund
+       *  @param from - account name
+       *  @param fund_name - fund name
+       *  @param amount - funding amount (asset)
+       *  @param memo - memo string
+       */
+      annotated_signed_transaction transfer_fund(string from, string fund_name, asset amount, string memo, bool broadcast );
+
+      /**
+       * get PIA rank list
+       * @param limit Maximum number of results to return -- must not exceed 1000
+       * @return PIA rank list. If some accounts has same PIA balance, is displayed accounts in the order of registration.
+       */
+      vector< account_balance_api_obj > get_pia_rank( int limit );
+
+      /**
+       * get SNAC rank list
+       * @param limit Maximum number of results to return -- must not exceed 1000
+       * @return SNAC rank list. If some accounts has same SNAC balance, is displayed accounts in the order of registration.
+       */
+      vector< account_balance_api_obj > get_snac_rank( int limit );
 };
 
 struct plain_keys {
@@ -945,6 +1291,8 @@ FC_REFLECT( futurepia::wallet::wallet_data,
 FC_REFLECT( futurepia::wallet::brain_key_info, (brain_priv_key)(wif_priv_key) (pub_key))
 
 FC_REFLECT( futurepia::wallet::plain_keys, (checksum)(keys) )
+
+FC_REFLECT( futurepia::wallet::creating_dapp_result, (trx)(dapp_key) )
 
 FC_REFLECT_ENUM( futurepia::wallet::authority_type, (owner)(active)(posting) )
 
@@ -967,51 +1315,47 @@ FC_API( futurepia::wallet::wallet_api,
         (list_my_accounts)
         (list_accounts)
         (list_bobservers)
+        (list_bproducers)
         (get_bobserver)
         (get_account)
         (get_block)
         (get_ops_in_block)
-        (get_feed_history)
-        (get_conversion_requests)
         (get_account_history)
+        (get_history_by_opname)
         (get_state)
 
         /// transaction api
         (create_account)
         (create_account_with_keys)
-        (create_account_delegated)
-        (create_account_with_keys_delegated)
         (update_account)
         (update_account_auth_key)
         (update_account_auth_account)
         (update_account_auth_threshold)
         (update_account_meta)
         (update_account_memo_key)
+        (update_bobserver)
         (transfer)
-        (escrow_transfer)
-        (escrow_approve)
-        (escrow_dispute)
-        (escrow_release)
-        (convert_fpch)
-        (publish_feed)
-        (get_order_book)
-        (get_open_orders)
-        (create_order)
-        (cancel_order)
+        (convert)
+        (post_comment)
+        (delete_comment)
+        (like_comment)
+        (dislike_comment)
+        (recommend_comment)
+        (bet_comment)
+        (create_comment_betting_state)
+        (update_comment_betting_state)
         (set_transaction_expiration)
-        (challenge)
-        (prove)
         (request_account_recovery)
         (recover_account)
         (change_recovery_account)
         (get_owner_history)
-        (transfer_to_savings)
-        (transfer_from_savings)
-        (cancel_transfer_from_savings)
+        (transfer_savings)
+        (cancel_transfer_savings)
+        (conclusion_transfer_savings)
+        (get_transfer_savings_from)
+        (get_transfer_savings_to)
         (get_encrypted_memo)
         (decrypt_memo)
-        (decline_voting_rights)
-        (claim_reward_balance)
 
         // private message api
         (send_private_message)
@@ -1023,21 +1367,78 @@ FC_API( futurepia::wallet::wallet_api,
         (serialize_transaction)
         (sign_transaction)
 
+        // block producer
+        (appointment_to_bproducer)
+        (except_to_bobserver)
+
         // token plugin and api
-        (create_token)
-        (get_token)
-        (get_token_balance)
-        (list_tokens)
-        (transfer_token)
-        (burn_token)
-        (get_accounts_by_token)
+        ( create_token )
+        ( issue_token )
+        ( get_token )
+        ( get_token_balance )
+        ( list_tokens )
+        ( transfer_token )
+        ( burn_token )
+        ( get_accounts_by_token )
+        ( get_tokens_by_dapp )
+        ( set_token_staking_interest )
+        ( setup_token_fund )
+        ( transfer_token_fund )
+        ( staking_token_fund )
+        ( get_token_staking_list )
+        ( list_token_fund_withdraw )
+        ( get_token_fund )
+        ( get_token_staking_interest )
+        ( transfer_token_savings )
+        ( cancel_transfer_token_savings )
+        ( conclude_transfer_token_savings )
+        ( get_token_savings_withdraw_from )
+        ( get_token_savings_withdraw_to )
+        ( list_token_savings_withdraw )
 
         (network_add_nodes)
         (network_get_connected_peers)
 
         (get_active_bobservers)
-        (get_miner_queue)
         (get_transaction)
-      )
 
+         // dapp plugin and api
+        ( create_dapp )
+        ( reissue_dapp_key )
+        ( list_dapps )
+        ( get_dapp )
+        ( get_dapps_by_owner )
+        ( post_dapp_comment )
+        ( vote_dapp_comment )
+        ( delete_dapp_comment )
+        ( get_dapp_content )
+        ( get_dapp_content_replies )
+        ( list_dapp_contents )
+        ( set_exchange_rate )
+
+        ( join_dapp )
+        ( leave_dapp )
+        ( vote_dapp )
+        ( vote_dapp_transaction_fee )
+        ( list_dapp_users )
+        ( get_join_dapps )
+        ( get_dapp_votes )
+        ( get_dapp_history )
+
+         // staking & fund 
+        ( fund_info )
+        ( get_staking_fund_from )
+        ( get_staking_fund_list )
+        ( staking_fund )
+        ( transfer_fund )
+
+        ( get_pia_rank )
+        ( get_snac_rank )
+
+        // exchange
+        ( exchange )
+        ( cancel_exchange )
+        ( get_exchange_from )
+        ( get_exchange_list )
+      )
 FC_REFLECT( futurepia::wallet::memo_data, (from)(to)(nonce)(check)(encrypted) )

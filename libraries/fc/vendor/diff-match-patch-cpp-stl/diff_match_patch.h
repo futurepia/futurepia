@@ -1669,7 +1669,7 @@ class diff_match_patch {
 
     int bin_min, bin_mid;
     int bin_max = pattern.length() + text.length();
-    int *rd;
+    int *rd = NULL;
     int *last_rd = NULL;
     for (int d = 0; d < (int)pattern.length(); d++) {
       // Scan for the best match; each iteration allows for one more error.
@@ -1718,7 +1718,7 @@ class diff_match_patch {
             // Told you so.
             score_threshold = score;
             best_loc = j - 1;
-            if (best_loc > loc) {
+            if ( static_cast<int>( best_loc ) > loc) {
               // When passing loc, don't exceed our current distance from loc.
               start = std::max(1, 2 * loc - (int)best_loc);
             } else {

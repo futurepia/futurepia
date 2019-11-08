@@ -26,8 +26,8 @@ endif()
 add_library( futurepia_wallet wallet.cpp ${CMAKE_CURRENT_BINARY_DIR}/api_documentation.cpp ${HEADERS} )
 # I don't know why futurepia_app is required twice in the following line, I just know the linker breaks if it isn't.
 target_link_libraries( futurepia_wallet PRIVATE futurepia_app graphene_net futurepia_chain futurepia_protocol graphene_utilities 
-                                                fc futurepia_private_message futurepia_app futurepia_account_by_key futurepia_token 
-                                                ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
+                                                fc futurepia_private_message futurepia_app futurepia_account_by_key 
+                                                futurepia_token futurepia_dapp futurepia_dapp_history ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
 target_include_directories( futurepia_wallet PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" )
 
 if(MSVC)

@@ -7,7 +7,6 @@
 
 namespace futurepia { namespace protocol {
 
-/* Quick conversion utilities from http://joelverhagen.com/blog/2010/11/convert-an-int-to-a-string-and-vice-versa-in-c/ */
 inline int string_to_int( fc::string input )
 {
    std::stringstream s( input );

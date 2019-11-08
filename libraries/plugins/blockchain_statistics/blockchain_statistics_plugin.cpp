@@ -2,6 +2,7 @@
 
 #include <futurepia/app/impacted.hpp>
 #include <futurepia/chain/account_object.hpp>
+#include <futurepia/chain/comment_object.hpp>
 #include <futurepia/chain/history_object.hpp>
 
 #include <futurepia/chain/database.hpp>
@@ -23,6 +24,7 @@ class blockchain_statistics_plugin_impl
       virtual ~blockchain_statistics_plugin_impl() {}
 
       void on_block( const signed_block& b );
+      void pre_operation( const operation_notification& o );
       void post_operation( const operation_notification& o );
 
       blockchain_statistics_plugin&       _self;
@@ -51,18 +53,10 @@ struct operation_process
       {
          b.transfers++;
 
-         if( op.amount.symbol == FUTUREPIA_SYMBOL )
-            b.futurepia_transferred += op.amount.amount;
+         if( op.amount.symbol == PIA_SYMBOL )
+            b.pia_transferred += op.amount.amount;
          else
-            b.fpch_transferred += op.amount.amount;
-      });
-   }
-
-   void operator()( const interest_operation& op )const
-   {
-      _db.modify( _bucket, [&]( bucket_object& b )
-      {
-         b.fpch_paid_as_interest += op.interest.amount;
+            b.snac_transferred += op.amount.amount;
       });
    }
 
@@ -70,70 +64,69 @@ struct operation_process
    {
       _db.modify( _bucket, [&]( bucket_object& b )
       {
-         b.paid_accounts_created++;
+         b.accounts_created++;
       });
    }
 
-   void operator()( const pow_operation& op )const
+   void operator()( const comment_operation& op )const
    {
       _db.modify( _bucket, [&]( bucket_object& b )
       {
-         auto& worker = _db.get_account( op.worker_account );
+         auto& comment = _db.get_comment( op.author, op.permlink );
 
-         if( worker.created == _db.head_block_time() )
-            b.mined_accounts_created++;
-
-         b.total_pow++;
-
-         uint64_t bits = ( _db.get_dynamic_global_properties().num_pow_bobservers / 4 ) + 4;
-         uint128_t estimated_hashes = ( 1 << bits );
-         uint32_t delta_t;
-
-         if( b.seconds == 0 )
-            delta_t = _db.head_block_time().sec_since_epoch() - b.open.sec_since_epoch();
+         if( comment.created == _db.head_block_time() )
+         {
+            if( comment.parent_author.length() )
+               b.replies++;
+            else
+               b.root_comments++;
+         }
          else
-         	delta_t = b.seconds;
-
-         b.estimated_hashpower = ( b.estimated_hashpower * delta_t + estimated_hashes ) / delta_t;
+         {
+            if( comment.parent_author.length() )
+               b.reply_edits++;
+            else
+               b.root_comment_edits++;
+         }
       });
    }
 
-   void operator()( const curation_reward_operation& op )const
+   void operator()( const comment_vote_operation& op )const
    {
       _db.modify( _bucket, [&]( bucket_object& b )
       {
+         auto& comment = _db.get_comment( op.author, op.permlink );
+         
+         if( comment.parent_author.size() )
+            b.new_reply_votes++;
+         else
+            b.new_root_votes++;
+
+         switch( static_cast<comment_vote_type>(op.vote_type) )
+         {
+            case comment_vote_type::LIKE:
+               b.like_count++;
+               break;
+            case comment_vote_type::DISLIKE:
+               b.dislike_count++;
+               break;
+         }
       });
    }
 
-   void operator()( const liquidity_reward_operation& op )const
+   void operator()( const comment_betting_operation& op )const
    {
       _db.modify( _bucket, [&]( bucket_object& b )
       {
-         b.liquidity_rewards_paid += op.payout.amount;
-      });
-   }
-
-   void operator()( const limit_order_create_operation& op )const
-   {
-      _db.modify( _bucket, [&]( bucket_object& b )
-      {
-         b.limit_orders_created++;
-      });
-   }
-
-   void operator()( const fill_order_operation& op )const
-   {
-      _db.modify( _bucket, [&]( bucket_object& b )
-      {
-         b.limit_orders_filled += 2;
-      });
-   }
-
-   void operator()( const limit_order_cancel_operation& op )const
-   {
-      _db.modify( _bucket, [&]( bucket_object& b )
-      {
-         b.limit_orders_cancelled++;
+         switch( static_cast<comment_betting_type>(op.betting_type) )
+         {
+            case comment_betting_type::RECOMMEND:
+               b.recommend_count++;
+               break;
+            case comment_betting_type::BETTING:
+               b.betting_count++;
+               break;
+         }
       });
    }
 
@@ -141,19 +134,20 @@ struct operation_process
    {
       _db.modify( _bucket, [&]( bucket_object& b )
       {
-         b.fpch_conversion_requests_created++;
-         b.fpch_to_be_converted += op.amount.amount;
+         b.snac_conversion_requests_created++;
+         b.snac_to_be_converted += op.amount.amount;
       });
    }
 
-   void operator()( const fill_convert_request_operation& op )const
+   void operator()( const fill_exchange_operation& op )const
    {
       _db.modify( _bucket, [&]( bucket_object& b )
       {
-         b.fpch_conversion_requests_filled++;
-         b.futurepia_converted += op.amount_out.amount;
+         b.snac_conversion_requests_created++;
+         b.snac_to_be_converted += op.amount.amount;
       });
    }
+
 };
 
 void blockchain_statistics_plugin_impl::on_block( const signed_block& b )
@@ -243,6 +237,29 @@ void blockchain_statistics_plugin_impl::on_block( const signed_block& b )
    }
 }
 
+void blockchain_statistics_plugin_impl::pre_operation( const operation_notification& o )
+{
+   auto& db = _self.database();
+
+   for( auto bucket_id : _current_buckets )
+   {
+      if( o.op.which() == operation::tag< delete_comment_operation >::value )
+      {
+         delete_comment_operation op = o.op.get< delete_comment_operation >();
+         auto comment = db.get_comment( op.author, op.permlink );
+         const auto& bucket = db.get(bucket_id);
+
+         db.modify( bucket, [&]( bucket_object& b )
+         {
+            if( comment.parent_author.length() )
+               b.replies_deleted++;
+            else
+               b.root_comments_deleted++;
+         });
+      }
+   }
+}
+
 void blockchain_statistics_plugin_impl::post_operation( const operation_notification& o )
 {
    try
@@ -294,6 +311,7 @@ void blockchain_statistics_plugin::plugin_initialize( const boost::program_optio
       chain::database& db = database();
 
       db.applied_block.connect( [&]( const signed_block& b ){ _my->on_block( b ); } );
+      db.pre_apply_operation.connect( [&]( const operation_notification& o ){ _my->pre_operation( o ); } );
       db.post_apply_operation.connect( [&]( const operation_notification& o ){ _my->post_operation( o ); } );
 
       add_plugin_index< bucket_index >(db);

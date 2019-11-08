@@ -1,0 +1,56 @@
+<server address>
+
+build server : 192.168.100.166 
+
+
+< Create personal folder  >
+
+sudo adduser user_id   // server create user
+
+sudo smbpasswd -a user_id   // samba create user
+
+sudo vi /etc/samba/smb.conf  // samba folder setting file 
+
+[folder_name]     
+commet = personal folders
+path = /home/folder_name
+valid users = user_id
+writable = yes
+create mask = 0644
+directory mask = 0755
+
+sudo service smbd restart   // samba server restart
+
+<-- Put the futurepia file in your personal folder.  -->
+
+
+< futurepia build >
+
+cd /home/folder_name 
+
+cd /home/folder_name/futurepia   // Move futurepia sourcecode folder
+
+mkdir build   // Create build folder
+
+cd bulid
+
+mainnet : cmake -DCMAKE_BUILD_TYPE=Release ..
+
+cd ~    // move home folder
+sudo chmod 777 futurepia/ -R   // Authorize after futurepia sourcecode folder creation
+
+cd /home/folder_name/futurepia/build   // Move futurepia sourcecode folder
+
+make -j$(nproc) futurepiad
+
+make -j$(nproc) cli_wallet
+
+
+
+
+
+
+
+
+
+

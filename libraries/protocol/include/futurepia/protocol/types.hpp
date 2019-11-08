@@ -76,7 +76,9 @@ namespace futurepia {
       typedef fc::ecc::compact_signature  signature_type;
       typedef safe<int64_t>               share_type;
       typedef uint16_t                    weight_type;
-
+      typedef fixed_string_32             dapp_name_type;
+      typedef account_name_type           token_name_type;
+      typedef fixed_string_32             fund_name_type;
 
       struct public_key_type
       {
@@ -145,6 +147,25 @@ namespace futurepia {
          friend bool operator == ( const extended_private_key_type& p1, const extended_private_key_type& p2);
          friend bool operator != ( const extended_private_key_type& p1, const extended_private_key_type& p2);
       };
+
+      enum class comment_vote_type : uint16_t
+      {
+         LIKE        = 11, 
+         DISLIKE     = 12 
+      };
+
+      enum class comment_betting_type : uint16_t
+      {
+         RECOMMEND   = 21,
+         BETTING     = 22
+      };
+
+      enum class dapp_state_type : uint8_t
+      {
+         PENDING        = 101, 
+         APPROVAL       = 102,
+         REJECTION      = 103
+      };
 } }  // futurepia::protocol
 
 namespace fc
@@ -165,5 +186,19 @@ FC_REFLECT( futurepia::protocol::extended_private_key_type, (key_data) )
 FC_REFLECT( futurepia::protocol::extended_private_key_type::binary_key, (check)(data) )
 
 FC_REFLECT_TYPENAME( futurepia::protocol::share_type )
+
+FC_REFLECT_ENUM( futurepia::protocol::comment_vote_type, 
+                  ( LIKE )
+                  ( DISLIKE ) 
+               )
+FC_REFLECT_ENUM( futurepia::protocol::comment_betting_type, 
+                  ( RECOMMEND )
+                  ( BETTING ) 
+               )
+FC_REFLECT_ENUM( futurepia::protocol::dapp_state_type, 
+                  ( PENDING )
+                  ( APPROVAL ) 
+                  ( REJECTION )
+               )
 
 FC_REFLECT( futurepia::void_t, )

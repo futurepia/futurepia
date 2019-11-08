@@ -4,7 +4,6 @@
 #include <iostream>
 
 namespace chainbase {
-
    struct environment_check {
       environment_check() {
          memset( &compiler_version, 0, sizeof( compiler_version ) );
@@ -161,6 +160,7 @@ namespace chainbase {
       {
          item->undo();
       }
+      _session_signal->notify_on_undo_session( ALL_SESSION_CODE );
    }
 
    void database::squash()
@@ -169,6 +169,7 @@ namespace chainbase {
       {
          item->squash();
       }
+      _session_signal->notify_on_squash_session( ALL_SESSION_CODE );
    }
 
    void database::commit( int64_t revision )
@@ -177,6 +178,7 @@ namespace chainbase {
       {
          item->commit( revision );
       }
+      _session_signal->notify_on_commit_session( revision );
    }
 
    void database::undo_all()
@@ -185,6 +187,7 @@ namespace chainbase {
       {
          item->undo_all();
       }
+      _session_signal->notify_on_undo_session( ALL_SESSION_CODE );
    }
 
    database::session database::start_undo_session( bool enabled )
@@ -195,7 +198,7 @@ namespace chainbase {
          for( auto& item : _index_list ) {
             _sub_sessions.push_back( item->start_undo_session( enabled ) );
          }
-         return session( std::move( _sub_sessions ) );
+         return session( std::move( _sub_sessions ), _session_signal );
       } else {
          return session();
       }

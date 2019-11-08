@@ -9,8 +9,6 @@
 #include <fstream>
 
 namespace futurepia { namespace protocol {
-   struct chain_properties;
-   struct pow2;
    struct signed_block;
 } }
 
@@ -90,11 +88,6 @@ class debug_node_plugin : public futurepia::app::plugin
 
       void save_debug_updates( fc::mutable_variant_object& target );
       void load_debug_updates( const fc::variant_object& target );
-
-      void debug_mine_work(
-         chain::pow2& work,
-         uint32_t summary_target
-         );
 
       bool logging = true;
 

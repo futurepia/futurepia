@@ -20,6 +20,8 @@
 #include <boost/thread.hpp>
 #include <boost/throw_exception.hpp>
 
+#include <chainbase/session_signal.hpp>
+
 #include <array>
 #include <atomic>
 #include <fstream>
@@ -45,6 +47,7 @@ namespace chainbase {
    namespace bip = boost::interprocess;
    namespace bfs = boost::filesystem;
    using std::unique_ptr;
+   using std::shared_ptr;
    using std::vector;
 
    template<typename T>
@@ -249,7 +252,10 @@ namespace chainbase {
          class session {
             public:
                session( session&& mv )
-               :_index(mv._index),_apply(mv._apply){ mv._apply = false; }
+               :_index(mv._index),_apply(mv._apply),_revision(mv._revision)
+               { 
+                  mv._apply = false; 
+               }
 
                ~session() {
                   if( _apply ) {
@@ -599,7 +605,7 @@ namespace chainbase {
          index_impl( BaseIndex& base ):abstract_index( &base ),_base(base){}
 
          virtual unique_ptr<abstract_session> start_undo_session( bool enabled ) override {
-            return unique_ptr<abstract_session>(new session_impl<typename BaseIndex::session>( _base.start_undo_session( enabled ) ) );
+            return unique_ptr<abstract_session>( new session_impl<typename BaseIndex::session>( _base.start_undo_session( enabled ) ) );
          }
 
          virtual void     set_revision( int64_t revision ) override { _base.set_revision( revision ); }
@@ -665,6 +671,8 @@ namespace chainbase {
             read_write    = 1
          };
 
+         database():_session_signal( std::make_shared< session_signal >() ){}
+
          void open( const bfs::path& dir, uint32_t write = read_only, uint64_t shared_file_size = 0 );
          void close();
          void flush();
@@ -689,11 +697,17 @@ namespace chainbase {
 
          struct session {
             public:
-               session( session&& s ):_index_sessions( std::move(s._index_sessions) ),_revision( s._revision ){}
-               session( vector<std::unique_ptr<abstract_session>>&& s ):_index_sessions( std::move(s) )
+               session( session&& s )
+                  :_index_sessions( std::move(s._index_sessions) ), _revision( s._revision ), _session_signal( s._session_signal )
+               {
+               }
+               session( vector<std::unique_ptr<abstract_session>>&& s, std::shared_ptr< session_signal > sig )
+                  :_index_sessions( std::move(s) ), _session_signal( sig )
                {
                   if( _index_sessions.size() )
                      _revision = _index_sessions[0]->revision();
+                     
+                  _session_signal->notify_on_start_session( _revision );
                }
 
                ~session() {
@@ -704,28 +718,32 @@ namespace chainbase {
                {
                   for( auto& i : _index_sessions ) i->push();
                   _index_sessions.clear();
+                  if( _session_signal ) _session_signal->notify_on_push_session( _revision );
                }
 
                void squash()
                {
                   for( auto& i : _index_sessions ) i->squash();
                   _index_sessions.clear();
+                  if( _session_signal ) _session_signal->notify_on_squash_session( _revision );
                }
 
                void undo()
                {
                   for( auto& i : _index_sessions ) i->undo();
                   _index_sessions.clear();
+                  if( _session_signal ) _session_signal->notify_on_undo_session( _revision );
                }
 
                int64_t revision()const { return _revision; }
 
             private:
                friend class database;
-               session(){}
+               session() {}
 
                vector< std::unique_ptr<abstract_session> > _index_sessions;
                int64_t _revision = -1;
+               std::shared_ptr< session_signal > _session_signal;
          };
 
          session start_undo_session( bool enabled );
@@ -986,6 +1004,7 @@ namespace chainbase {
                }
             }
          }
+         std::shared_ptr< session_signal > get_session_signal() { return _session_signal; }
 
       private:
          unique_ptr<bip::managed_mapped_file>                        _segment;
@@ -1009,9 +1028,11 @@ namespace chainbase {
          int32_t                                                     _read_lock_count = 0;
          int32_t                                                     _write_lock_count = 0;
          bool                                                        _enable_require_locking = false;
+         std::shared_ptr< session_signal >                           _session_signal;
    };
 
    template<typename Object, typename... Args>
    using shared_multi_index_container = boost::multi_index_container<Object,Args..., chainbase::allocator<Object> >;
+
 }  // namepsace chainbase
 

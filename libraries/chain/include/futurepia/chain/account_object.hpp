@@ -33,66 +33,29 @@ namespace futurepia { namespace chain {
          account_name_type name;
          public_key_type   memo_key;
          shared_string     json_metadata;
-         account_name_type proxy;
 
          time_point_sec    last_account_update;
 
          time_point_sec    created;
          bool              mined = true;
-         bool              owner_challenged = false;
-         bool              active_challenged = false;
-         time_point_sec    last_owner_proved = time_point_sec::min();
-         time_point_sec    last_active_proved = time_point_sec::min();
          account_name_type recovery_account;
          account_name_type reset_account = FUTUREPIA_NULL_ACCOUNT;
          time_point_sec    last_account_recovery;
          uint32_t          comment_count = 0;
-         uint32_t          lifetime_vote_count = 0;
          uint32_t          post_count = 0;
 
          bool              can_vote = true;
-         uint16_t          voting_power = FUTUREPIA_100_PERCENT;   ///< current voting power of this account, it falls after every vote
          time_point_sec    last_vote_time; ///< used to increase the voting power of this account the longer it goes without voting.
 
-         asset             balance = asset( 0, FUTUREPIA_SYMBOL );  ///< total liquid shares held by this account
-         asset             savings_balance = asset( 0, FUTUREPIA_SYMBOL );  ///< total liquid shares held by this account
-
-         /**
-          *  FPCH Deposits pay interest based upon the interest rate set by bobservers. The purpose of these
-          *  fields is to track the total (time * fpch_balance) that it is held. Then at the appointed time
-          *  interest can be paid using the following equation:
-          *
-          *  interest = interest_rate * fpch_seconds / seconds_per_year
-          *
-          *  Every time the fpch_balance is updated the fpch_seconds is also updated. If at least
-          *  FUTUREPIA_MIN_COMPOUNDING_INTERVAL_SECONDS has past since fpch_last_interest_payment then
-          *  interest is added to fpch_balance.
-          *
-          *  @defgroup fpch_data fpch Balance Data
-          */
-         ///@{
-         asset             fpch_balance = asset( 0, FPCH_SYMBOL ); /// total fpch balance
-         uint128_t         fpch_seconds; ///< total fpch * how long it has been hel
-         time_point_sec    fpch_seconds_last_update; ///< the last time the fpch_seconds was updated
-         time_point_sec    fpch_last_interest_payment; ///< used to pay interest at most once per month
-
-
-         asset             savings_fpch_balance = asset( 0, FPCH_SYMBOL ); /// total fpch balance
-         uint128_t         savings_fpch_seconds; ///< total fpch * how long it has been hel
-         time_point_sec    savings_fpch_seconds_last_update; ///< the last time the fpch_seconds was updated
-         time_point_sec    savings_fpch_last_interest_payment; ///< used to pay interest at most once per month
-
-         uint8_t           savings_withdraw_requests = 0;
-         ///@}
-
-         asset             reward_fpch_balance = asset( 0, FPCH_SYMBOL );
-         asset             reward_futurepia_balance = asset( 0, FUTUREPIA_SYMBOL );
-
-         share_type        curation_rewards = 0;
-         share_type        posting_rewards = 0;
-
-         share_type        withdrawn = 0; /// Track how many shares have been withdrawn
-         share_type        to_withdraw = 0; /// Might be able to look this up with operation history.
+         asset             balance = asset( 0, PIA_SYMBOL );  
+         asset             savings_balance = asset( 0, PIA_SYMBOL );
+         asset             exchange_balance = asset( 0, PIA_SYMBOL );
+         asset             snac_balance = asset( 0, SNAC_SYMBOL ); 
+         asset             savings_snac_balance = asset( 0, SNAC_SYMBOL ); 
+         asset             exchange_snac_balance = asset( 0, SNAC_SYMBOL ); 
+         uint16_t          savings_withdraw_requests = 0;
+         uint16_t          fund_withdraw_requests = 0;
+         uint16_t          exchange_requests = 0;
 
          uint16_t          bobservers_voted_for = 0;
 
@@ -180,13 +143,10 @@ namespace futurepia { namespace chain {
    };
 
    struct by_name;
-   struct by_proxy;
    struct by_last_post;
-   struct by_futurepia_balance;
-   struct by_smp_balance;
-   struct by_smd_balance;
+   struct by_pia_balance;
+   struct by_snac_balance;
    struct by_post_count;
-   struct by_vote_count;
 
    /**
     * @ingroup object_index
@@ -198,12 +158,6 @@ namespace futurepia { namespace chain {
             member< account_object, account_id_type, &account_object::id > >,
          ordered_unique< tag< by_name >,
             member< account_object, account_name_type, &account_object::name > >,
-         ordered_unique< tag< by_proxy >,
-            composite_key< account_object,
-               member< account_object, account_name_type, &account_object::proxy >,
-               member< account_object, account_id_type, &account_object::id >
-            > /// composite key by proxy
-         >,
          ordered_unique< tag< by_last_post >,
             composite_key< account_object,
                member< account_object, time_point_sec, &account_object::last_post >,
@@ -211,16 +165,16 @@ namespace futurepia { namespace chain {
             >,
             composite_key_compare< std::greater< time_point_sec >, std::less< account_id_type > >
          >,
-         ordered_unique< tag< by_futurepia_balance >,
+         ordered_unique< tag< by_pia_balance >,
             composite_key< account_object,
                member< account_object, asset, &account_object::balance >,
                member< account_object, account_id_type, &account_object::id >
             >,
             composite_key_compare< std::greater< asset >, std::less< account_id_type > >
          >,
-         ordered_unique< tag< by_smd_balance >,
+         ordered_unique< tag< by_snac_balance >,
             composite_key< account_object,
-               member< account_object, asset, &account_object::fpch_balance >,
+               member< account_object, asset, &account_object::snac_balance >,
                member< account_object, account_id_type, &account_object::id >
             >,
             composite_key_compare< std::greater< asset >, std::less< account_id_type > >
@@ -228,13 +182,6 @@ namespace futurepia { namespace chain {
          ordered_unique< tag< by_post_count >,
             composite_key< account_object,
                member< account_object, uint32_t, &account_object::post_count >,
-               member< account_object, account_id_type, &account_object::id >
-            >,
-            composite_key_compare< std::greater< uint32_t >, std::less< account_id_type > >
-         >,
-         ordered_unique< tag< by_vote_count >,
-            composite_key< account_object,
-               member< account_object, uint32_t, &account_object::lifetime_vote_count >,
                member< account_object, account_id_type, &account_object::id >
             >,
             composite_key_compare< std::greater< uint32_t >, std::less< account_id_type > >
@@ -341,18 +288,19 @@ namespace futurepia { namespace chain {
 } }
 
 FC_REFLECT( futurepia::chain::account_object,
-             (id)(name)(memo_key)(json_metadata)(proxy)(last_account_update)
+             (id)(name)(memo_key)(json_metadata)(last_account_update)
              (created)(mined)
-             (owner_challenged)(active_challenged)(last_owner_proved)(last_active_proved)(recovery_account)(last_account_recovery)(reset_account)
-             (comment_count)(lifetime_vote_count)(post_count)(can_vote)(voting_power)(last_vote_time)
+             (recovery_account)(last_account_recovery)(reset_account)
+             (comment_count)(post_count)(can_vote)(last_vote_time)
              (balance)
              (savings_balance)
-             (fpch_balance)(fpch_seconds)(fpch_seconds_last_update)(fpch_last_interest_payment)
-             (savings_fpch_balance)(savings_fpch_seconds)(savings_fpch_seconds_last_update)(savings_fpch_last_interest_payment)(savings_withdraw_requests)
-             (reward_futurepia_balance)(reward_fpch_balance)
-             (withdrawn)(to_withdraw)
-             (curation_rewards)
-             (posting_rewards)
+             (exchange_balance)
+             (snac_balance)
+             (savings_snac_balance)
+             (exchange_snac_balance)
+             (savings_withdraw_requests)
+             (fund_withdraw_requests)
+             (exchange_requests)
              (bobservers_voted_for)
              (last_post)(last_root_post)(post_bandwidth)
           )

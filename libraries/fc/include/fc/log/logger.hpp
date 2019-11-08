@@ -37,6 +37,8 @@ namespace fc
 
          logger&    set_log_level( log_level e );
          log_level  get_log_level()const;
+         logger&    set_parent( const logger& l );
+         logger     get_parent()const;
 
          void  set_name( const fc::string& n );
          const fc::string& name()const;

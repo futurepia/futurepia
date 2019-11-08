@@ -90,6 +90,9 @@ namespace fc {
        return get_logger_map()[s];
     }
 
+    logger  logger::get_parent()const { return my->_parent; }
+    logger& logger::set_parent(const logger& p) { my->_parent = p; return *this; }
+
     log_level logger::get_log_level()const { return my->_level; }
     logger& logger::set_log_level(log_level ll) { my->_level = ll; return *this; }
 

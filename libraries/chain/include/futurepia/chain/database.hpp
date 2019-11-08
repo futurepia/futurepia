@@ -54,20 +54,20 @@ namespace futurepia { namespace chain {
          enum validation_steps
          {
             skip_nothing                = 0,
-            skip_bobserver_signature      = 1 << 0,  ///< used while reindexing
-            skip_transaction_signatures = 1 << 1,  ///< used by non-bobserver nodes
-            skip_transaction_dupe_check = 1 << 2,  ///< used while reindexing
-            skip_fork_db                = 1 << 3,  ///< used while reindexing
-            skip_block_size_check       = 1 << 4,  ///< used when applying locally generated transactions
-            skip_tapos_check            = 1 << 5,  ///< used while reindexing -- note this skips expiration check as well
-            skip_authority_check        = 1 << 6,  ///< used while reindexing -- disables any checking of authority on transactions
-            skip_merkle_check           = 1 << 7,  ///< used while reindexing
-            skip_undo_history_check     = 1 << 8,  ///< used while reindexing
+            skip_bobserver_signature    = 1 << 0,    ///< used while reindexing
+            skip_transaction_signatures = 1 << 1,    ///< used by non-bobserver nodes
+            skip_transaction_dupe_check = 1 << 2,    ///< used while reindexing
+            skip_fork_db                = 1 << 3,    ///< used while reindexing
+            skip_block_size_check       = 1 << 4,    ///< used when applying locally generated transactions
+            skip_tapos_check            = 1 << 5,    ///< used while reindexing -- note this skips expiration check as well
+            skip_authority_check        = 1 << 6,    ///< used while reindexing -- disables any checking of authority on transactions
+            skip_merkle_check           = 1 << 7,    ///< used while reindexing
+            skip_undo_history_check     = 1 << 8,    ///< used while reindexing
             skip_bobserver_schedule_check = 1 << 9,  ///< used while reindexing
-            skip_validate               = 1 << 10, ///< used prior to checkpoint, skips validate() call on transaction
-            skip_validate_invariants    = 1 << 11, ///< used to skip database invariant check on block application
-            skip_undo_block             = 1 << 12, ///< used to skip undo db on reindex
-            skip_block_log              = 1 << 13  ///< used to skip block logging on reindex
+            skip_validate               = 1 << 10,   ///< used prior to checkpoint, skips validate() call on transaction
+            skip_validate_invariants    = 1 << 11,   ///< used to skip database invariant check on block application
+            skip_undo_block             = 1 << 12,   ///< used to skip undo db on reindex
+            skip_block_log              = 1 << 13    ///< used to skip block logging on reindex
          };
 
          /**
@@ -105,8 +105,6 @@ namespace futurepia { namespace chain {
           */
          bool                       is_known_block( const block_id_type& id )const;
          bool                       is_known_transaction( const transaction_id_type& id )const;
-         fc::sha256                 get_pow_target()const;
-         uint32_t                   get_pow_summary_target()const;
          block_id_type              find_block_id_for_num( uint32_t block_num )const;
          block_id_type              get_block_id_for_num( uint32_t block_num )const;
          optional<signed_block>     fetch_block_by_id( const block_id_type& id )const;
@@ -123,25 +121,28 @@ namespace futurepia { namespace chain {
          const account_object&  get_account(  const account_name_type& name )const;
          const account_object*  find_account( const account_name_type& name )const;
 
-         const escrow_object&   get_escrow(  const account_name_type& name, uint32_t escrow_id )const;
-         const escrow_object*   find_escrow( const account_name_type& name, uint32_t escrow_id )const;
+         const comment_object&  get_comment(  const account_name_type& author, const shared_string& permlink )const;
+         const comment_object*  find_comment( const account_name_type& author, const shared_string& permlink )const;
 
-         const limit_order_object& get_limit_order(  const account_name_type& owner, uint32_t id )const;
-         const limit_order_object* find_limit_order( const account_name_type& owner, uint32_t id )const;
+         const comment_object&  get_comment(  const account_name_type& author, const string& permlink )const;
+         const comment_object*  find_comment( const account_name_type& author, const string& permlink )const;
 
          const savings_withdraw_object& get_savings_withdraw(  const account_name_type& owner, uint32_t request_id )const;
          const savings_withdraw_object* find_savings_withdraw( const account_name_type& owner, uint32_t request_id )const;
 
+         const fund_withdraw_object& get_fund_withdraw(  const account_name_type& owner, const string& fund_name, uint32_t request_id )const;
+         const fund_withdraw_object* find_fund_withdraw( const account_name_type& owner, const string& fund_name, uint32_t request_id )const;
+
+         const exchange_withdraw_object& get_exchange_withdraw(  const account_name_type& owner, uint32_t request_id )const;
+         const exchange_withdraw_object* find_exchange_withdraw( const account_name_type& owner, uint32_t request_id )const;
+
          const dynamic_global_property_object&  get_dynamic_global_properties()const;
          const node_property_object&            get_node_properties()const;
-         const feed_history_object&             get_feed_history()const;
-         const bobserver_schedule_object&         get_bobserver_schedule_object()const;
+         const bobserver_schedule_object&       get_bobserver_schedule_object()const;
          const hardfork_property_object&        get_hardfork_property_object()const;
 
-         /**
-          *  Deducts fee from the account and the share supply
-          */
-         void pay_fee( const account_object& a, asset fee );
+         const common_fund_object&              get_common_fund( const string name )const;
+         const dapp_reward_fund_object&         get_dapp_reward_fund()const;
 
          void max_bandwidth_per_share()const;
 
@@ -184,12 +185,13 @@ namespace futurepia { namespace chain {
           */
          void notify_pre_apply_operation( operation_notification& note );
          void notify_post_apply_operation( const operation_notification& note );
-         inline const void push_virtual_operation( const operation& op, bool force = false ); // vops are not needed for low mem. Force will push them on low mem.
+         void push_virtual_operation( const operation& op, bool force = false ); // vops are not needed for low mem. Force will push them on low mem.
          void notify_pre_apply_block( const signed_block& block );
          void notify_applied_block( const signed_block& block );
          void notify_on_pending_transaction( const signed_transaction& tx );
          void notify_on_pre_apply_transaction( const signed_transaction& tx );
          void notify_on_applied_transaction( const signed_transaction& tx );
+         void notify_on_apply_hardfork( const uint32_t hardfork );
 
          /**
           *  This signal is emitted for plugins to process every operation after it has been fully applied.
@@ -226,6 +228,11 @@ namespace futurepia { namespace chain {
           * chain state.
           */
          fc::signal<void(const signed_transaction&)>     on_applied_transaction;
+
+         /**
+          * This signal is emitted hardfork time
+          */
+         fc::signal< void( const uint32_t& ) > on_apply_hardfork;
 
          /**
           *  Emitted After a block has been applied and committed.  The callback
@@ -275,48 +282,40 @@ namespace futurepia { namespace chain {
           * If no such N exists, return 0.
           */
          uint32_t get_slot_at_time(fc::time_point_sec when)const;
+         
+         void adjust_balance( const account_object& a, const asset& delta );
+         void adjust_savings_balance( const account_object& a, const asset& delta );
+         void adjust_exchange_balance( const account_object& a, const asset& delta );
+         void adjust_fund_balance( const string name, const asset& delta );
+         void adjust_fund_withdraw_balance( const string name, const asset& delta );
+         void adjust_dapp_reward_fund_balance( const asset& delta );
+         void adjust_supply( const asset& delta );
+         void adjust_printed_supply( const asset& delta );
+         void adjust_exchange_rate( const price& p );
+         void update_owner_authority( const account_object& account, const authority& owner_authority );
 
-         /** @return the fpch created and deposited to_account, may return FPC if there is no median feed */
-         std::pair< asset, asset > create_fpch( const account_object& to_account, asset futurepia, bool to_reward_balance=false );
+         asset get_balance( const account_object& a, asset_symbol_type symbol )const;
+         asset get_savings_balance( const account_object& a, asset_symbol_type symbol )const;
+         asset get_exchange_balance( const account_object& a, asset_symbol_type symbol )const;
+         asset get_balance( const string& aname, asset_symbol_type symbol )const { return get_balance( get_account(aname), symbol ); }
 
-         void        adjust_liquidity_reward( const account_object& owner, const asset& volume, bool is_bid );
-         void        adjust_balance( const account_object& a, const asset& delta );
-         void        adjust_savings_balance( const account_object& a, const asset& delta );
-         void        adjust_reward_balance( const account_object& a, const asset& delta );
-         void        adjust_supply( const asset& delta/*, bool adjust_vesting = false */);
-         void        update_owner_authority( const account_object& account, const authority& owner_authority );
-
-         asset       get_balance( const account_object& a, asset_symbol_type symbol )const;
-         asset       get_savings_balance( const account_object& a, asset_symbol_type symbol )const;
-         asset       get_balance( const string& aname, asset_symbol_type symbol )const { return get_balance( get_account(aname), symbol ); }
+         /** this updates the vote of a single bobserver as a result of a vote being added or removed*/
+         void adjust_bobserver_vote( const bobserver_object& obj, share_type delta );
 
          /** clears all vote records for a particular account but does not update the
           * bobserver vote totals.  Vote totals should be updated first via a call to
           * adjust_proxied_bobserver_votes( a, -a.bobserver_vote_weight() )
           */
+         void clear_bobserver_votes( const account_object& a );
          void process_funds();
-         void process_conversions();
          void process_savings_withdraws();
+         void process_fund_withdraws();
+         void process_exchange_withdraws();
          void account_recovery_processing();
-         void expire_escrow_ratification();
-         void update_median_feed();
+         void process_decline_voting_rights();
 
-         asset get_liquidity_reward()const;
-         asset get_content_reward()const;
-         asset get_producer_reward();
-         asset get_curation_reward()const;
-         asset get_pow_reward()const;
-
-         share_type pay_reward_funds( share_type reward );
-
-         void  pay_liquidity_reward();
-
-         /**
-          * Helper method to return the current fpch value of a given amount of
-          * FPC.  Return 0 FPCH if there isn't a current_median_history
-          */
-         asset to_fpch( const asset& futurepia )const;
-         asset to_futurepia( const asset& fpch )const;
+         asset to_snac( const asset& pia )const;
+         asset to_pia( const asset& snac )const;
 
          time_point_sec   head_block_time()const;
          uint32_t         head_block_num()const;
@@ -329,39 +328,22 @@ namespace futurepia { namespace chain {
 
          void initialize_evaluators();
          void set_custom_operation_interpreter( const std::string& id, std::shared_ptr< custom_operation_interpreter > registry );
-         std::shared_ptr< custom_operation_interpreter > get_custom_json_evaluator( const std::string& id );
+         std::shared_ptr< custom_operation_interpreter > get_custom_evaluator( const std::string& id );
 
          /// Reset the object graph in-memory
          void initialize_indexes();
          void init_schema();
          void init_genesis(uint64_t initial_supply = FUTUREPIA_INIT_SUPPLY );
 
-         /**
-          *  This method validates transactions without adding it to the pending state.
-          *  @throw if an error occurs
-          */
-         void validate_transaction( const signed_transaction& trx );
-
          /** when popping a block, the transactions that were removed get cached here so they
           * can be reapplied at the proper time */
          std::deque< signed_transaction >       _popped_tx;
 
-
-         bool apply_order( const limit_order_object& new_order_object );
-         bool fill_order( const limit_order_object& order, const asset& pays, const asset& receives );
-         void cancel_order( const limit_order_object& obj );
-         int  match( const limit_order_object& bid, const limit_order_object& ask, const price& trade_price );
-
-         void perform_vesting_share_split( uint32_t magnitude );
-         /**
-          * write again asset precision of all block.
-          */
-         void retally_asset_precision();
-         void retally_liquidity_weight();
+         void update_median_feed();
          void update_virtual_supply();
 
          bool has_hardfork( uint32_t hardfork )const;
-
+         
          /* For testing and debugging only. Given a hardfork
             with id N, applies all hardforks with id <= N */
          void set_hardfork( uint32_t hardfork, bool process_now = true );
@@ -382,11 +364,10 @@ namespace futurepia { namespace chain {
          void set_flush_interval( uint32_t flush_blocks );
          void show_free_memory( bool force );
 
-#ifdef IS_TEST_NET
-         bool liquidity_rewards_enabled = true;
-         bool skip_price_feed_limit_check = true;
          bool skip_transaction_delta_check = true;
-#endif
+         void check_total_supply(const asset& pia);
+         void check_virtual_supply(const price& p);
+         void check_virtual_supply(const asset& delta);
 
    protected:
          //Mark pop_undo() as protected -- we do not want outside calling pop_undo(); it should call pop_block() instead
@@ -415,7 +396,6 @@ namespace futurepia { namespace chain {
          void update_signing_bobserver(const bobserver_object& signing_bobserver, const signed_block& new_block);
          void update_last_irreversible_block();
          void clear_expired_transactions();
-         void clear_expired_orders();
          void process_header_extensions( const signed_block& next_block );
 
          void init_hardforks();
@@ -455,7 +435,7 @@ namespace futurepia { namespace chain {
          uint32_t                      _last_free_gb_printed = 0;
 
          flat_map< std::string, std::shared_ptr< custom_operation_interpreter > >   _custom_operation_interpreters;
-         std::string                       _json_schema;
+         std::string                   _json_schema;
    };
 
 } }

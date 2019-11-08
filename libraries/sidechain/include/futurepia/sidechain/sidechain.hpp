@@ -40,12 +40,12 @@ namespace futurepia { namespace sidechain {
         string   sidechain; ///< name of the sidechain account
         string   name; /// sub account within the side chain
 
-        asset    futurepia_balance;
-        asset    dollar_balance;
+        asset    pia_balance;
+        asset    snac_balance;
   };
 
   FC_REFLECT_DERIVED( futurepia::sidechain::side_account, (graphene::db::object),
-                      (sidechain)(name)(futurepia_balance)(dollar_balance)
+                      (sidechain)(name)(pia_balance)(snac_balance)
                      );
 
 

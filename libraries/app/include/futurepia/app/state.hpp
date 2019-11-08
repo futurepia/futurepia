@@ -5,61 +5,151 @@
 #include <futurepia/chain/global_property_object.hpp>
 #include <futurepia/chain/account_object.hpp>
 #include <futurepia/chain/futurepia_objects.hpp>
+#include <futurepia/dapp/dapp_api.hpp>
 
 namespace futurepia { namespace app {
    using std::string;
    using std::vector;
-
-   struct extended_limit_order : public limit_order_api_obj
-   {
-      extended_limit_order(){}
-      extended_limit_order( const limit_order_object& o ):limit_order_api_obj(o){}
-
-      double real_price  = 0;
-      bool   rewarded    = false;
-   };
+   using protocol::comment_vote_type;
+   using protocol::comment_betting_type;
 
    struct discussion_index
    {
-      string           category;    /// category by which everything is filtered
-      vector< string > trending;    /// trending posts over the last 24 hours
-      vector< string > payout;      /// pending posts by payout
-      vector< string > payout_comments; /// pending comments by payout
-      vector< string > trending30;  /// pending lifetime payout
       vector< string > created;     /// creation date
       vector< string > responses;   /// creation date
-      vector< string > updated;     /// creation date
-      vector< string > active;      /// last update or reply
-      vector< string > votes;       /// last update or reply
-      vector< string > cashout;     /// last update or reply
-      vector< string > maturing;    /// about to be paid out
-      vector< string > best;        /// total lifetime payout
-      vector< string > hot;         /// total lifetime payout
-      vector< string > promoted;    /// pending lifetime payout
    };
 
-   struct tag_index
+   struct tag_name_index
    {
       vector< string > trending; /// pending payouts
    };
 
-   struct vote_state
+   struct vote_api_object
    {
-      string         voter;
-      uint64_t       weight = 0;
-      int64_t        rshares = 0;
-      int16_t        percent = 0;
-      share_type     reputation = 0;
-      time_point_sec time;
+      vote_api_object(){}
+      vote_api_object( const comment_vote_object o, const futurepia::chain::database& db) :
+         time( o.created )
+         , amount( o.voting_amount )
+      {
+         voter = db.get( o.voter ).name;
+      }
+
+      string               voter;
+      time_point_sec       time;
+      asset                amount;
    };
 
-   struct account_vote
+   struct account_vote_api_object
    {
-      string         authorperm;
-      uint64_t       weight = 0;
-      int64_t        rshares = 0;
-      int16_t        percent = 0;
-      time_point_sec time;
+      account_vote_api_object(){}
+      account_vote_api_object( const comment_vote_object o, const futurepia::chain::database& db) :
+         type( o.vote_type )
+         , time( o.created )
+         , amount( o.voting_amount )
+      {
+         const auto& vo = db.get( o.comment );
+         author = vo.author;
+         permlink = to_string( vo.permlink );
+      }
+
+      string               author;
+      string               permlink;
+      comment_vote_type    type;
+      time_point_sec       time;
+      asset                amount;
+   };
+
+   struct bet_api_object
+   {
+      bet_api_object(){}
+      bet_api_object( const comment_betting_object o, const futurepia::chain::database& db) :
+         type( o.betting_type )
+         , round_no( o.round_no )
+         , time( o.created )
+         , amount( o.betting_amount )
+      {
+         bettor = db.get( o.bettor ).name;
+      }
+
+      string                  bettor;
+      comment_betting_type    type;
+      uint16_t                round_no;
+      time_point_sec          time;
+      asset                   amount;
+   };
+
+   struct account_bet_api_object
+   {
+      account_bet_api_object(){}
+      account_bet_api_object( const comment_betting_object o, const futurepia::chain::database& db ) :
+         type( o.betting_type )
+         , round_no( o.round_no )
+         , time( o.created )
+         , amount( o.betting_amount )
+      {
+         const auto& vo = db.get( o.comment );
+         author = vo.author;
+         permlink = to_string( vo.permlink );
+      }
+
+      string                  author;
+      string                  permlink;
+      comment_betting_type    type;
+      uint16_t                round_no;
+      time_point_sec          time;
+      asset                   amount;
+   };
+   
+   struct round_bet_api_object
+   {
+      round_bet_api_object(){}
+      round_bet_api_object( const comment_betting_object o, const futurepia::chain::database& db ):
+         type( o.betting_type )
+         , time( o.created )
+         , amount( o.betting_amount )
+      {
+         const auto& vo = db.get( o.comment );
+         author = vo.author;
+         permlink = to_string( vo.permlink );
+         bettor = db.get( o.bettor ).name;
+      }
+
+      string                  author;
+      string                  permlink;
+      string                  bettor;
+      comment_betting_type    type;
+      time_point_sec          time;
+      asset                   amount;
+   };
+
+   struct betting_state
+   {
+      betting_state(){}
+      betting_state( const comment_betting_state_object& o):
+         round_no( o.round_no )
+         , allow_betting( o.allow_betting)
+         , betting_count( o.betting_count )
+         , recommend_count( o.recommend_count )
+         {}
+
+      uint16_t          round_no;
+      bool              allow_betting;
+      uint32_t          betting_count;
+      uint32_t          recommend_count;
+   };
+
+   struct  discussion : public comment_api_obj {
+      discussion( const comment_object& o ):comment_api_obj(o){}
+      discussion(){}
+      
+      string                        root_title;
+      vector< betting_state >       betting_states;
+      vector< vote_api_object >     like_votes;
+      vector< vote_api_object >     dislike_votes;
+      vector< bet_api_object >      recommend_votes;
+      vector< bet_api_object >      betting_list;
+      vector< string >              replies; 
+      uint32_t                      body_length = 0;
    };
 
    /**
@@ -70,25 +160,16 @@ namespace futurepia { namespace app {
       extended_account(){}
       extended_account( const account_object& a, const database& db ):account_api_obj( a, db ){}
 
-      share_type                              reputation = 0;
       map<uint64_t,applied_operation>         transfer_history; /// transfer to/from vesting
-      map<uint64_t,applied_operation>         market_history; /// limit order / cancel / fill
       map<uint64_t,applied_operation>         post_history;
       map<uint64_t,applied_operation>         vote_history;
+      map<uint64_t,applied_operation>         betting_history;
       map<uint64_t,applied_operation>         other_history;
       set<string>                             bobserver_votes;
-      vector<pair<string,uint32_t>>            tags_usage;
-      vector<pair<account_name_type,uint32_t>> guest_bloggers;
 
-      optional<map<uint32_t,extended_limit_order>> open_orders;
       optional<vector<string>>                comments; /// permlinks for this user
-      optional<vector<string>>                blog; /// blog posts for this user
-      optional<vector<string>>                feed; /// feed posts for this user
       optional<vector<string>>                recent_replies; /// blog posts for this user
-      optional<vector<string>>                recommended; /// posts recommened for this user
    };
-
-
 
    struct candle_stick {
       time_point_sec  open_time;
@@ -97,27 +178,8 @@ namespace futurepia { namespace app {
       double          low = 0;
       double          open = 0;
       double          close = 0;
-      double          futurepia_volume = 0;
-      double          dollar_volume = 0;
-   };
-
-   struct order_history_item {
-      time_point_sec time;
-      string         type; // buy or sell
-      asset          fpch_quantity;
-      asset          futurepia_quantity;
-      double         real_price = 0;
-   };
-
-   struct market {
-      vector<extended_limit_order> bids;
-      vector<extended_limit_order> asks;
-      vector<order_history_item>   history;
-      vector<int>                  available_candlesticks;
-      vector<int>                  available_zoom;
-      int                          current_candlestick = 0;
-      int                          current_zoom = 0;
-      vector<candle_stick>         price_history;
+      double          pia_volume = 0;
+      double          snac_volume = 0;
    };
 
    /**
@@ -128,46 +190,41 @@ namespace futurepia { namespace app {
 
         dynamic_global_property_api_obj   props;
 
-        app::tag_index                    tag_idx;
-
-        /**
-         * "" is the global discussion index
-         */
         map<string, discussion_index>     discussion_idx;
 
         /**
          *  map from account/slug to full nested discussion
          */
+        map< string, discussion >         content;
         map< string, extended_account >   accounts;
 
-        /**
-         * The list of miners who are queued to produce work
-         */
-        vector< account_name_type >       pow_queue;
-        map< string, bobserver_api_obj >    bobservers;
-        bobserver_schedule_api_obj          bobserver_schedule;
-        price                             feed_price;
+        map< string, bobserver_api_obj >  bobservers;
+        bobserver_schedule_api_obj        bobserver_schedule;
         string                            error;
-        optional< market >                market_data;
+
+        map<string, futurepia::dapp::dapp_discussion>  dapp_content;
    };
 
 } }
 
 FC_REFLECT_DERIVED( futurepia::app::extended_account,
                    (futurepia::app::account_api_obj),
-                   (reputation)
-                   (transfer_history)(market_history)(post_history)(vote_history)(other_history)(bobserver_votes)(tags_usage)(guest_bloggers)(open_orders)(comments)(feed)(blog)(recent_replies)(recommended) )
+                   (transfer_history)(post_history)(vote_history)(other_history)(bobserver_votes)(comments)(recent_replies) )
 
 
-FC_REFLECT( futurepia::app::vote_state, (voter)(weight)(rshares)(percent)(reputation)(time) );
-FC_REFLECT( futurepia::app::account_vote, (authorperm)(weight)(rshares)(percent)(time) );
+FC_REFLECT( futurepia::app::vote_api_object, (voter)(time)(amount) );
+FC_REFLECT( futurepia::app::account_vote_api_object, (author)(permlink)(type)(time)(amount) );
+FC_REFLECT( futurepia::app::bet_api_object, (bettor)(type)(round_no)(time)(amount) );
+FC_REFLECT( futurepia::app::account_bet_api_object, (author)(permlink)(type)(round_no)(time)(amount) );
+FC_REFLECT( futurepia::app::round_bet_api_object, (author)(permlink)(bettor)(type)(time)(amount) );
+FC_REFLECT( futurepia::app::betting_state, (round_no)(allow_betting)(betting_count)(recommend_count) );
 
-FC_REFLECT( futurepia::app::discussion_index, (category)(trending)(payout)(payout_comments)(trending30)(updated)(created)(responses)(active)(votes)(maturing)(best)(hot)(promoted)(cashout) )
-FC_REFLECT( futurepia::app::tag_index, (trending) )
+FC_REFLECT( futurepia::app::discussion_index, (created)(responses) )
+FC_REFLECT( futurepia::app::tag_name_index, (trending) )
+FC_REFLECT_DERIVED( futurepia::app::discussion, 
+                  (futurepia::app::comment_api_obj), 
+                  (root_title)(betting_states)(like_votes)(dislike_votes)(recommend_votes)(betting_list)(replies)(body_length) )
 
-FC_REFLECT( futurepia::app::state, (current_route)(props)(tag_idx)(accounts)(pow_queue)(bobservers)(discussion_idx)(bobserver_schedule)(feed_price)(error)(market_data) )
+FC_REFLECT( futurepia::app::state, (current_route)(props)(discussion_idx)(content)(accounts)(bobservers)(bobserver_schedule)(error)(dapp_content) )
 
-FC_REFLECT_DERIVED( futurepia::app::extended_limit_order, (futurepia::app::limit_order_api_obj), (real_price)(rewarded) )
-FC_REFLECT( futurepia::app::order_history_item, (time)(type)(fpch_quantity)(futurepia_quantity)(real_price) );
-FC_REFLECT( futurepia::app::market, (bids)(asks)(history)(price_history)(available_candlesticks)(available_zoom)(current_candlestick)(current_zoom) )
-FC_REFLECT( futurepia::app::candle_stick, (open_time)(period)(high)(low)(open)(close)(futurepia_volume)(dollar_volume) );
+FC_REFLECT( futurepia::app::candle_stick, (open_time)(period)(high)(low)(open)(close)(pia_volume)(snac_volume) );

@@ -327,6 +327,7 @@ namespace fc { namespace ssh {
     _trace_level(0), // was  LIBSSH2_TRACE_ERROR 
     logr(fc::logger::get( "fc::ssh::client" )),
     remote_system_is_windows(false) {
+    logr.set_parent( fc::logger::get( "default" ) );
   }
 
   detail::client_impl::~client_impl() {

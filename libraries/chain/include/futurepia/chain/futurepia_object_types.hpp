@@ -48,21 +48,21 @@ enum object_type
    comment_object_type,
    comment_vote_object_type,
    bobserver_vote_object_type,
-   limit_order_object_type,
-   feed_history_object_type,
-   convert_request_object_type,
-   liquidity_reward_balance_object_type,
    operation_object_type,
    account_history_object_type,
    hardfork_property_object_type,
    owner_authority_history_object_type,
    account_recovery_request_object_type,
    change_recovery_account_request_object_type,
-   escrow_object_type,
    savings_withdraw_object_type,
    decline_voting_rights_request_object_type,
    block_stats_object_type,
-   reward_fund_object_type,
+   common_fund_object_type,
+   comment_betting_state_object_type,
+   comment_betting_object_type,
+   fund_withdraw_object_type,
+   exchange_withdraw_object_type,
+   dapp_reward_fund_object_type
 };
 
 class dynamic_global_property_object;
@@ -72,21 +72,24 @@ class bobserver_object;
 class transaction_object;
 class block_summary_object;
 class bobserver_schedule_object;
-class limit_order_object;
-class feed_history_object;
-class convert_request_object;
-class liquidity_reward_balance_object;
+class comment_object;
+class comment_vote_object;
+class bobserver_vote_object;
 class operation_object;
 class account_history_object;
 class hardfork_property_object;
 class owner_authority_history_object;
 class account_recovery_request_object;
 class change_recovery_account_request_object;
-class escrow_object;
 class savings_withdraw_object;
 class decline_voting_rights_request_object;
 class block_stats_object;
-class reward_fund_object;
+class common_fund_object;
+class comment_betting_state_object;
+class comment_betting_object;
+class fund_withdraw_object;
+class exchange_withdraw_object;
+class dapp_reward_fund_object;
 
 typedef oid< dynamic_global_property_object         > dynamic_global_property_id_type;
 typedef oid< account_object                         > account_id_type;
@@ -95,27 +98,28 @@ typedef oid< bobserver_object                       > bobserver_id_type;
 typedef oid< transaction_object                     > transaction_object_id_type;
 typedef oid< block_summary_object                   > block_summary_id_type;
 typedef oid< bobserver_schedule_object              > bobserver_schedule_id_type;
-typedef oid< limit_order_object                     > limit_order_id_type;
-typedef oid< feed_history_object                    > feed_history_id_type;
-typedef oid< convert_request_object                 > convert_request_id_type;
-typedef oid< liquidity_reward_balance_object        > liquidity_reward_balance_id_type;
+typedef oid< comment_object                         > comment_id_type;
+typedef oid< comment_vote_object                    > comment_vote_id_type;
+typedef oid< bobserver_vote_object                  > bobserver_vote_id_type;
 typedef oid< operation_object                       > operation_id_type;
 typedef oid< account_history_object                 > account_history_id_type;
 typedef oid< hardfork_property_object               > hardfork_property_id_type;
 typedef oid< owner_authority_history_object         > owner_authority_history_id_type;
 typedef oid< account_recovery_request_object        > account_recovery_request_id_type;
 typedef oid< change_recovery_account_request_object > change_recovery_account_request_id_type;
-typedef oid< escrow_object                          > escrow_id_type;
 typedef oid< savings_withdraw_object                > savings_withdraw_id_type;
 typedef oid< decline_voting_rights_request_object   > decline_voting_rights_request_id_type;
 typedef oid< block_stats_object                     > block_stats_id_type;
-typedef oid< reward_fund_object                     > reward_fund_id_type;
+typedef oid< common_fund_object                     > common_fund_id_type;
+typedef oid< comment_betting_state_object           > comment_betting_state_id_type;
+typedef oid< comment_betting_object                 > comment_betting_id_type;
+typedef oid< fund_withdraw_object                   > fund_withdraw_id_type;
+typedef oid< exchange_withdraw_object               > exchange_withdraw_id_type;
+typedef oid< dapp_reward_fund_object                > dapp_reward_fund_id_type;
 
 enum bandwidth_type
 {
-   post,    ///< Rate limiting posting reward eligibility over time
-   forum,   ///< Rate limiting for all forum related actins
-   market   ///< Rate limiting for all other actions
+   post    ///< Rate limiting posting reward eligibility over time
 };
 
 } } //futurepia::chain
@@ -202,24 +206,24 @@ FC_REFLECT_ENUM( futurepia::chain::object_type,
                  (comment_object_type)
                  (comment_vote_object_type)
                  (bobserver_vote_object_type)
-                 (limit_order_object_type)
-                 (feed_history_object_type)
-                 (convert_request_object_type)
-                 (liquidity_reward_balance_object_type)
                  (operation_object_type)
                  (account_history_object_type)
                  (hardfork_property_object_type)
                  (owner_authority_history_object_type)
                  (account_recovery_request_object_type)
                  (change_recovery_account_request_object_type)
-                 (escrow_object_type)
                  (savings_withdraw_object_type)
                  (decline_voting_rights_request_object_type)
                  (block_stats_object_type)
-                 (reward_fund_object_type)
+                 (common_fund_object_type)
+                 (comment_betting_state_object_type)
+                 (comment_betting_object_type)
+                 (fund_withdraw_object_type)
+                 (exchange_withdraw_object_type)
+                 (dapp_reward_fund_object_type)
                )
 
 FC_REFLECT_TYPENAME( futurepia::chain::shared_string )
 FC_REFLECT_TYPENAME( futurepia::chain::buffer_type )
 
-FC_REFLECT_ENUM( futurepia::chain::bandwidth_type, (post)(forum)(market) )
+FC_REFLECT_ENUM( futurepia::chain::bandwidth_type, (post))

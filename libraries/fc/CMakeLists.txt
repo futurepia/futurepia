@@ -8,16 +8,11 @@ MESSAGE(STATUS "Configuring project fc located in: ${CMAKE_CURRENT_SOURCE_DIR}")
 SET( CMAKE_AUTOMOC OFF )
 
 # Setup module path to make visible used CMake extensions
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/GitVersionGen")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/CMakeModules")
 
 INCLUDE(GetPrerequisites)
 INCLUDE( VersionMacros )
 INCLUDE( SetupTargetMacros )
-INCLUDE(GetGitRevisionDescription)
-
-get_git_head_revision(GIT_REFSPEC FC_GIT_REVISION_SHA)
-get_git_unix_timestamp(FC_GIT_REVISION_UNIX_TIMESTAMP)
 
 SET( DEFAULT_HEADER_INSTALL_DIR include/\${target} )
 SET( DEFAULT_LIBRARY_INSTALL_DIR lib/ )
@@ -248,8 +243,6 @@ set( sources
   ${fc_sources}
 )
 
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/src/git_revision.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/git_revision.cpp" @ONLY)
-list(APPEND sources "${CMAKE_CURRENT_BINARY_DIR}/git_revision.cpp")
 list(APPEND sources ${fc_headers})
 
 add_subdirectory( vendor/websocketpp )

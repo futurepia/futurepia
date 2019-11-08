@@ -44,8 +44,4 @@ namespace fc {
       return ap;
    }
    
-   static bool reg_console_appender = appender::register_appender<console_appender>( "console" );
-   static bool reg_file_appender = appender::register_appender<file_appender>( "file" );
-   static bool reg_gelf_appender = appender::register_appender<gelf_appender>( "gelf" );
-
 } // namespace fc

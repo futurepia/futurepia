@@ -68,13 +68,6 @@ namespace futurepia { namespace chain {
 
 using boost::container::flat_set;
 
-struct reward_fund_context
-{
-   uint128_t   recent_claims = 0;
-   asset       reward_balance = asset( 0, FUTUREPIA_SYMBOL );
-   share_type  futurepia_awarded = 0;
-};
-
 class database_impl
 {
    public:
@@ -369,24 +362,24 @@ const account_object* database::find_account( const account_name_type& name )con
    return find< account_object, by_name >( name );
 }
 
-const escrow_object& database::get_escrow( const account_name_type& name, uint32_t escrow_id )const
+const comment_object& database::get_comment( const account_name_type& author, const shared_string& permlink )const
 { try {
-   return get< escrow_object, by_from_id >( boost::make_tuple( name, escrow_id ) );
-} FC_CAPTURE_AND_RETHROW( (name)(escrow_id) ) }
+   return get< comment_object, by_permlink >( boost::make_tuple( author, permlink ) );
+} FC_CAPTURE_AND_RETHROW( (author)(permlink) ) }
 
-const escrow_object* database::find_escrow( const account_name_type& name, uint32_t escrow_id )const
+const comment_object* database::find_comment( const account_name_type& author, const shared_string& permlink )const
 {
-   return find< escrow_object, by_from_id >( boost::make_tuple( name, escrow_id ) );
+   return find< comment_object, by_permlink >( boost::make_tuple( author, permlink ) );
 }
 
-const limit_order_object& database::get_limit_order( const account_name_type& name, uint32_t orderid )const
+const comment_object& database::get_comment( const account_name_type& author, const string& permlink )const
 { try {
-   return get< limit_order_object, by_account >( boost::make_tuple( name, orderid ) );
-} FC_CAPTURE_AND_RETHROW( (name)(orderid) ) }
+   return get< comment_object, by_permlink >( boost::make_tuple( author, permlink) );
+} FC_CAPTURE_AND_RETHROW( (author)(permlink) ) }
 
-const limit_order_object* database::find_limit_order( const account_name_type& name, uint32_t orderid )const
+const comment_object* database::find_comment( const account_name_type& author, const string& permlink )const
 {
-   return find< limit_order_object, by_account >( boost::make_tuple( name, orderid ) );
+   return find< comment_object, by_permlink >( boost::make_tuple( author, permlink ) );
 }
 
 const savings_withdraw_object& database::get_savings_withdraw( const account_name_type& owner, uint32_t request_id )const
@@ -399,6 +392,26 @@ const savings_withdraw_object* database::find_savings_withdraw( const account_na
    return find< savings_withdraw_object, by_from_rid >( boost::make_tuple( owner, request_id ) );
 }
 
+const fund_withdraw_object& database::get_fund_withdraw( const account_name_type& owner, const string& fund_name, uint32_t request_id )const
+{ try {
+   return get< fund_withdraw_object, by_from_id >( boost::make_tuple( owner, fund_name, request_id ) );
+} FC_CAPTURE_AND_RETHROW( (owner)(request_id) ) }
+
+const fund_withdraw_object* database::find_fund_withdraw( const account_name_type& owner, const string& fund_name, uint32_t request_id )const
+{
+   return find< fund_withdraw_object, by_from_id >( boost::make_tuple( owner, fund_name, request_id ) );
+}
+
+const exchange_withdraw_object& database::get_exchange_withdraw( const account_name_type& owner, uint32_t request_id )const
+{ try {
+   return get< exchange_withdraw_object, by_from_id >( boost::make_tuple( owner, request_id ) );
+} FC_CAPTURE_AND_RETHROW( (owner)(request_id) ) }
+
+const exchange_withdraw_object* database::find_exchange_withdraw( const account_name_type& owner, uint32_t request_id )const
+{
+   return find< exchange_withdraw_object, by_from_id >( boost::make_tuple( owner, request_id ) );
+}
+
 const dynamic_global_property_object&database::get_dynamic_global_properties() const
 { try {
    return get< dynamic_global_property_object >();
@@ -409,11 +422,6 @@ const node_property_object& database::get_node_properties() const
    return _node_property_object;
 }
 
-const feed_history_object& database::get_feed_history()const
-{ try {
-   return get< feed_history_object >();
-} FC_CAPTURE_AND_RETHROW() }
-
 const bobserver_schedule_object& database::get_bobserver_schedule_object()const
 { try {
    return get< bobserver_schedule_object >();
@@ -423,17 +431,6 @@ const hardfork_property_object& database::get_hardfork_property_object()const
 { try {
    return get< hardfork_property_object >();
 } FC_CAPTURE_AND_RETHROW() }
-
-void database::pay_fee( const account_object& account, asset fee )
-{
-   FC_ASSERT( fee.amount >= 0 ); /// NOTE if this fails then validate() on some operation is probably wrong
-   if( fee.amount == 0 )
-      return;
-
-   FC_ASSERT( account.balance >= fee );
-   adjust_balance( account, -fee );
-   adjust_supply( -fee );
-}
 
 uint32_t database::bobserver_participation_rate()const
 {
@@ -761,23 +758,27 @@ signed_block database::_generate_block(
    const auto& bobserver = get_bobserver( bobserver_owner );
 
    if( bobserver.running_version != FUTUREPIA_BLOCKCHAIN_VERSION )
-         pending_block.extensions.insert( block_header_extensions( FUTUREPIA_BLOCKCHAIN_VERSION ) );
+      pending_block.extensions.insert( block_header_extensions( FUTUREPIA_BLOCKCHAIN_VERSION ) );
 
    const auto& hfp = get_hardfork_property_object();
 
-   if( hfp.current_hardfork_version < FUTUREPIA_BLOCKCHAIN_HARDFORK_VERSION // Binary is newer hardfork than has been applied
-         && ( bobserver.hardfork_version_vote != _hardfork_versions[ hfp.last_hardfork + 1 ] || bobserver.hardfork_time_vote != _hardfork_times[ hfp.last_hardfork + 1 ] ) ) // BObserver vote does not match binary configuration
+   if (bobserver.is_bproducer) 
    {
-         // Make vote match binary configuration
-         pending_block.extensions.insert( block_header_extensions( hardfork_version_vote( _hardfork_versions[ hfp.last_hardfork + 1 ], _hardfork_times[ hfp.last_hardfork + 1 ] ) ) );
-   }
-   else if( hfp.current_hardfork_version == FUTUREPIA_BLOCKCHAIN_HARDFORK_VERSION // Binary does not know of a new hardfork
-         && bobserver.hardfork_version_vote > FUTUREPIA_BLOCKCHAIN_HARDFORK_VERSION ) // Voting for hardfork in the future, that we do not know of...
-   {
-         // Make vote match binary configuration. This is vote to not apply the new hardfork.
-         pending_block.extensions.insert( block_header_extensions( hardfork_version_vote( _hardfork_versions[ hfp.last_hardfork ], _hardfork_times[ hfp.last_hardfork ] ) ) );
-   }
-
+      if( hfp.current_hardfork_version < FUTUREPIA_BLOCKCHAIN_HARDFORK_VERSION // Binary is newer hardfork than has been applied
+            && ( bobserver.hardfork_version_vote != _hardfork_versions[ hfp.last_hardfork + 1 ] 
+            || bobserver.hardfork_time_vote != _hardfork_times[ hfp.last_hardfork + 1 ] ) ) // Bobserver vote does not match binary configuration
+      {
+            // Make vote match binary configuration
+            pending_block.extensions.insert( block_header_extensions( hardfork_version_vote( _hardfork_versions[ hfp.last_hardfork + 1 ], _hardfork_times[ hfp.last_hardfork + 1 ] ) ) );
+      }
+      else if( hfp.current_hardfork_version == FUTUREPIA_BLOCKCHAIN_HARDFORK_VERSION // Binary does not know of a new hardfork
+            && bobserver.hardfork_version_vote > FUTUREPIA_BLOCKCHAIN_HARDFORK_VERSION ) // Voting for hardfork in the future, that we do not know of...
+      {
+            // Make vote match binary configuration. This is vote to not apply the new hardfork.
+            pending_block.extensions.insert( block_header_extensions( hardfork_version_vote( _hardfork_versions[ hfp.last_hardfork ], _hardfork_times[ hfp.last_hardfork ] ) ) );
+      }
+   }      
+ 
    if( !(skip & skip_bobserver_signature) )
       pending_block.sign( block_signing_private_key );
 
@@ -842,10 +843,12 @@ void database::notify_post_apply_operation( const operation_notification& note )
    FUTUREPIA_TRY_NOTIFY( post_apply_operation, note )
 }
 
-inline const void database::push_virtual_operation( const operation& op, bool force )
+void database::push_virtual_operation( const operation& op, bool force )
 {
    FC_ASSERT( is_virtual_operation( op ) );
    operation_notification note(op);
+   ++_current_virtual_op;
+   note.virtual_op = _current_virtual_op;
    notify_pre_apply_operation( note );
    notify_post_apply_operation( note );
 }
@@ -873,6 +876,10 @@ void database::notify_on_pre_apply_transaction( const signed_transaction& tx )
 void database::notify_on_applied_transaction( const signed_transaction& tx )
 {
    FUTUREPIA_TRY_NOTIFY( on_applied_transaction, tx )
+}
+
+void database::notify_on_apply_hardfork( const uint32_t hardfork ){
+   FUTUREPIA_TRY_NOTIFY( on_apply_hardfork, hardfork )
 }
 
 account_name_type database::get_scheduled_bobserver( uint32_t slot_num )const
@@ -916,124 +923,66 @@ uint32_t database::get_slot_at_time(fc::time_point_sec when)const
    return (when - first_slot_time).to_seconds() / FUTUREPIA_BLOCK_INTERVAL + 1;
 }
 
-/**
- *  Converts FPC into fpch and adds it to to_account while reducing the FPC supply
- *  by FPC and increasing the fpch supply by the specified amount.
- */
-std::pair< asset, asset > database::create_fpch( const account_object& to_account, asset futurepia, bool to_reward_balance )
+void database::adjust_bobserver_vote( const bobserver_object& bobserver, share_type delta )
 {
-   std::pair< asset, asset > assets( asset( 0, FPCH_SYMBOL ), asset( 0, FUTUREPIA_SYMBOL ) );
-
-   try
+   modify( bobserver, [&]( bobserver_object& w )
    {
-      if( futurepia.amount == 0 )
-         return assets;
+      w.votes += delta;
+   } );
+}
 
-      const auto& median_price = get_feed_history().current_median_history;
-      const auto& gpo = get_dynamic_global_properties();
-
-      if( !median_price.is_null() )
-      {
-         auto to_fpch = ( gpo.fpch_print_rate * futurepia.amount ) / FUTUREPIA_100_PERCENT;
-         auto to_futurepia = futurepia.amount - to_fpch;
-
-         auto fpch = asset( to_fpch, FUTUREPIA_SYMBOL ) * median_price;
-
-         if( to_reward_balance )
-         {
-            adjust_reward_balance( to_account, fpch );
-            adjust_reward_balance( to_account, asset( to_futurepia, FUTUREPIA_SYMBOL ) );
-         }
-         else
-         {
-            adjust_balance( to_account, fpch );
-            adjust_balance( to_account, asset( to_futurepia, FUTUREPIA_SYMBOL ) );
-         }
-
-         adjust_supply( asset( -to_fpch, FUTUREPIA_SYMBOL ) );
-         adjust_supply( fpch );
-         assets.first = fpch;
-         assets.second = to_futurepia;
-      }
-      else
-      {
-         adjust_balance( to_account, futurepia );
-         assets.second = futurepia;
-      }
+void database::clear_bobserver_votes( const account_object& a )
+{
+   const auto& vidx = get_index< bobserver_vote_index >().indices().get<by_account_bobserver>();
+   auto itr = vidx.lower_bound( boost::make_tuple( a.id, bobserver_id_type() ) );
+   while( itr != vidx.end() && itr->account == a.id )
+   {
+      const auto& current = *itr;
+      ++itr;
+      remove(current);
    }
-   FC_CAPTURE_LOG_AND_RETHROW( (to_account.name)(futurepia) )
 
-   return assets;
-}
-
-fc::sha256 database::get_pow_target()const
-{
-   const auto& dgp = get_dynamic_global_properties();
-   fc::sha256 target;
-   target._hash[0] = -1;
-   target._hash[1] = -1;
-   target._hash[2] = -1;
-   target._hash[3] = -1;
-   target = target >> ((dgp.num_pow_bobservers/4)+4);
-   return target;
-}
-
-uint32_t database::get_pow_summary_target()const
-{
-   const dynamic_global_property_object& dgp = get_dynamic_global_properties();
-   if( dgp.num_pow_bobservers >= 1004 )
-      return 0;
-
-   return (0xFE00 - 0x0040 * dgp.num_pow_bobservers ) << 0x10;
+   modify( a, [&](account_object& acc )
+   {
+      acc.bobservers_voted_for = 0;
+   });
 }
 
 void database::clear_null_account_balance()
 {
    const auto& null_account = get_account( FUTUREPIA_NULL_ACCOUNT );
-   asset total_futurepia( 0, FUTUREPIA_SYMBOL );
-   asset total_fpch( 0, FPCH_SYMBOL );
+   asset total_pia( 0, PIA_SYMBOL );
+   asset total_snac( 0, SNAC_SYMBOL );
 
    if( null_account.balance.amount > 0 )
    {
-      total_futurepia += null_account.balance;
+      total_pia += null_account.balance;
       adjust_balance( null_account, -null_account.balance );
    }
 
    if( null_account.savings_balance.amount > 0 )
    {
-      total_futurepia += null_account.savings_balance;
+      total_pia += null_account.savings_balance;
       adjust_savings_balance( null_account, -null_account.savings_balance );
    }
 
-   if( null_account.fpch_balance.amount > 0 )
+   if( null_account.snac_balance.amount > 0 )
    {
-      total_fpch += null_account.fpch_balance;
-      adjust_balance( null_account, -null_account.fpch_balance );
+      total_snac += null_account.snac_balance;
+      adjust_balance( null_account, -null_account.snac_balance );
    }
 
-   if( null_account.savings_fpch_balance.amount > 0 )
+   if( null_account.savings_snac_balance.amount > 0 )
    {
-      total_fpch += null_account.savings_fpch_balance;
-      adjust_savings_balance( null_account, -null_account.savings_fpch_balance );
+      total_snac += null_account.savings_snac_balance;
+      adjust_savings_balance( null_account, -null_account.savings_snac_balance );
    }
 
-   if( null_account.reward_futurepia_balance.amount > 0 )
-   {
-      total_futurepia += null_account.reward_futurepia_balance;
-      adjust_reward_balance( null_account, -null_account.reward_futurepia_balance );
-   }
+   if( total_pia.amount > 0 )
+      adjust_supply( -total_pia );
 
-   if( null_account.reward_fpch_balance.amount > 0 )
-   {
-      total_fpch += null_account.reward_fpch_balance;
-      adjust_reward_balance( null_account, -null_account.reward_fpch_balance );
-   }
-
-   if( total_futurepia.amount > 0 )
-      adjust_supply( -total_futurepia );
-
-   if( total_fpch.amount > 0 )
-      adjust_supply( -total_fpch );
+   if( total_snac.amount > 0 )
+      adjust_supply( -total_snac );
 }
 
 void database::update_owner_authority( const account_object& account, const authority& owner_authority )
@@ -1055,261 +1004,216 @@ void database::update_owner_authority( const account_object& account, const auth
    });
 }
 
-
-/**
- *  Overall the network has an inflation rate of 102% of virtual futurepia per year
- *  90% of inflation is directed to vesting shares
- *  10% of inflation is directed to subjective proof of work voting
- *  1% of inflation is directed to liquidity providers
- *  1% of inflation is directed to block producers
- *
- *  This method pays out vesting and reward shares every block, and liquidity shares once per day.
- *  This method does not pay out bobservers.
- */
 void database::process_funds()
 {
-#ifdef IS_TEST_NET
    const auto& props = get_dynamic_global_properties();
+   const auto& bobserver = get_bobserver( props.current_bobserver );
 
-   const auto supply_list = get_total_supply();
-   asset total_supply = supply_list.find( FUTUREPIA_SYMBOL )->second;
-   share_type max_suuply = FUTUREPIA_MAX_SUPPLY;
-
-   share_type new_futurepia = 100000000;  // 1 TPC
-   auto content_reward = 0; 
-   auto bobserver_reward = new_futurepia - content_reward; 
-
-   const auto& cwit = get_bobserver( props.current_bobserver );
-   const auto& bobserver = get_account( props.current_bobserver );
-
-   new_futurepia = content_reward + bobserver_reward;
-
-   auto remain_supply = max_suuply - (total_supply.amount + new_futurepia);
-
-   if( remain_supply < 0 ) // calcurate again.
+   if( has_hardfork( FUTUREPIA_HARDFORK_0_2 ) )  // process reward about dapp
    {
-      new_futurepia += remain_supply;
-      if(new_futurepia <= 0)
-         new_futurepia = 0;
-      bobserver_reward = new_futurepia - content_reward;
+      account_name_type reward_account;
+      if( bobserver.is_bproducer ) {
+         reward_account = bobserver.bp_owner;
+      } else {
+         reward_account = bobserver.account;
+      }
+
+      if( bobserver.bp_owner.size() == 0 ) {
+         reward_account = bobserver.account;
+      }
+      const auto& bobserver_account = get_account( reward_account );
+
+      dapp_reward_fund_object dapp_reward_fund = get_dapp_reward_fund();
+      asset reward = dapp_reward_fund.fund_balance;
+      if(reward.amount > 0) {
+         adjust_dapp_reward_fund_balance( -reward );
+         adjust_balance( bobserver_account, reward);
+         
+         dapp_reward_virtual_operation virtual_op = dapp_reward_virtual_operation( bobserver_account.name, reward );
+         push_virtual_operation( virtual_op );
+      }
    }
-
-   modify( props, [&]( dynamic_global_property_object& p )
-   {
-      p.current_supply           += asset( new_futurepia, FUTUREPIA_SYMBOL );
-      p.virtual_supply           += asset( new_futurepia, FUTUREPIA_SYMBOL );
-   });
-
-   modify( get_account( bobserver.name), [&]( account_object& a )
-   {
-      a.balance += bobserver_reward;
-   });
-
-   push_virtual_operation( producer_reward_operation( cwit.owner/*, producer_reward*/ ) );
-#endif
+   
 }
 
 void database::process_savings_withdraws()
 {
-  const auto& idx = get_index< savings_withdraw_index >().indices().get< by_complete_from_rid >();
-  auto itr = idx.begin();
-  while( itr != idx.end() ) {
-     if( itr->complete > head_block_time() )
-        break;
-     adjust_balance( get_account( itr->to ), itr->amount );
+   const auto& idx = get_index< savings_withdraw_index >().indices().get< by_complete_from_rid >();
+   auto itr = idx.begin();
+   while( itr != idx.end() ) {
+      
+      if( itr->complete > head_block_time() )
+         break;
 
-     modify( get_account( itr->from ), [&]( account_object& a )
-     {
-        a.savings_withdraw_requests--;
-     });
+      if ( itr->split_pay_order == itr->split_pay_month ) {
 
-     push_virtual_operation( fill_transfer_from_savings_operation( itr->from, itr->to, itr->amount, itr->request_id, to_string( itr->memo) ) );
+         asset  savings_balance = get_savings_balance(get_account( itr->to ), itr->amount.symbol);
+         FC_ASSERT(savings_balance >= itr->amount);
 
-     remove( *itr );
-     itr = idx.begin();
-  }
-}
+         adjust_balance( get_account( itr->to ), itr->amount );
+         adjust_savings_balance(get_account( itr->to ), -itr->amount);
 
-asset database::get_liquidity_reward()const
-{
-   return asset( 0, FUTUREPIA_SYMBOL );
-
-   const auto& props = get_dynamic_global_properties();
-   static_assert( FUTUREPIA_LIQUIDITY_REWARD_PERIOD_SEC == 60*60, "this code assumes a 1 hour time interval" );
-   asset percent( protocol::calc_percent_reward_per_hour< FUTUREPIA_LIQUIDITY_APR_PERCENT >( props.virtual_supply.amount ), FUTUREPIA_SYMBOL );
-   return std::max( percent, FUTUREPIA_MIN_LIQUIDITY_REWARD );
-}
-
-asset database::get_content_reward()const
-{
-   const auto& props = get_dynamic_global_properties();
-   static_assert( FUTUREPIA_BLOCK_INTERVAL == 3, "this code assumes a 3-second time interval" );
-   asset percent( protocol::calc_percent_reward_per_block< FUTUREPIA_CONTENT_APR_PERCENT >( props.virtual_supply.amount ), FUTUREPIA_SYMBOL );
-   return std::max( percent, FUTUREPIA_MIN_CONTENT_REWARD );
-}
-
-asset database::get_curation_reward()const
-{
-   const auto& props = get_dynamic_global_properties();
-   static_assert( FUTUREPIA_BLOCK_INTERVAL == 3, "this code assumes a 3-second time interval" );
-   asset percent( protocol::calc_percent_reward_per_block< FUTUREPIA_CURATE_APR_PERCENT >( props.virtual_supply.amount ), FUTUREPIA_SYMBOL);
-   return std::max( percent, FUTUREPIA_MIN_CURATE_REWARD );
-}
-
-asset database::get_producer_reward()
-{
-   const auto& props = get_dynamic_global_properties();
-   static_assert( FUTUREPIA_BLOCK_INTERVAL == 3, "this code assumes a 3-second time interval" );
-   asset percent( protocol::calc_percent_reward_per_block< FUTUREPIA_PRODUCER_APR_PERCENT >( props.virtual_supply.amount ), FUTUREPIA_SYMBOL);
-   auto pay = std::max( percent, FUTUREPIA_MIN_PRODUCER_REWARD );
-   const auto& bobserver_account = get_account( props.current_bobserver );
-
-   /// pay bobserver in vesting shares
-   if( props.head_block_number >= FUTUREPIA_START_MINER_VOTING_BLOCK ) {
-      // const auto& bobserver_obj = get_bobserver( props.current_bobserver );
-
-      push_virtual_operation( producer_reward_operation( bobserver_account.name ) );
-   }
-   else
-   {
-      modify( get_account( bobserver_account.name), [&]( account_object& a )
-      {
-         a.balance += pay;
-      } );
-   }
-
-   return pay;
-}
-
-asset database::get_pow_reward()const
-{
-   const auto& props = get_dynamic_global_properties();
-
-   static_assert( FUTUREPIA_BLOCK_INTERVAL == 3, "this code assumes a 3-second time interval" );
-   //static_assert( FUTUREPIA_MAX_BOBSERVERS == 21, "this code assumes 21 per round" );
-   asset percent( calc_percent_reward_per_round< FUTUREPIA_POW_APR_PERCENT >( props.virtual_supply.amount ), FUTUREPIA_SYMBOL);
-   return std::max( percent, FUTUREPIA_MIN_POW_REWARD );
-}
-
-
-void database::pay_liquidity_reward()
-{
-#ifdef IS_TEST_NET
-   if( !liquidity_rewards_enabled )
-      return;
-#endif
-
-   if( (head_block_num() % FUTUREPIA_LIQUIDITY_REWARD_BLOCKS) == 0 )
-   {
-      auto reward = get_liquidity_reward();
-
-      if( reward.amount == 0 )
-         return;
-
-      const auto& ridx = get_index< liquidity_reward_balance_index >().indices().get< by_volume_weight >();
-      auto itr = ridx.begin();
-      if( itr != ridx.end() && itr->volume_weight() > 0 )
-      {
-         adjust_supply( reward/*, true */);
-         adjust_balance( get(itr->owner), reward );
-         modify( *itr, [&]( liquidity_reward_balance_object& obj )
+         modify( get_account( itr->from ), [&]( account_object& a )
          {
-            obj.futurepia_volume = 0;
-            obj.fpch_volume   = 0;
-            obj.last_update  = head_block_time();
-            obj.weight = 0;
-         } );
+            a.savings_withdraw_requests--;
+         });
 
-         push_virtual_operation( liquidity_reward_operation( get(itr->owner).name, reward ) );
+         push_virtual_operation( fill_transfer_savings_operation( itr->from, itr->to, itr->amount, itr->total_amount, itr->split_pay_order, itr->split_pay_month, itr->request_id, to_string(itr->memo) ) );
+
+         remove( *itr );
+         itr = idx.begin();
+
+      } else {
+         
+         account_name_type from              = itr->from;
+         account_name_type to                = itr->to;
+         shared_string     memo              = itr->memo;
+         uint32_t          request_id        = itr->request_id;
+         asset             amount            = itr->amount;
+         asset             total_amount      = itr->total_amount;
+         uint8_t           split_pay_order   = itr->split_pay_order;
+         uint8_t           split_pay_month   = itr->split_pay_month;
+         time_point_sec    complete          = itr->complete;
+
+         asset             monthly_amount    = itr->total_amount;
+         asset             savings_balance   = get_savings_balance(get_account( to ), monthly_amount.symbol);
+
+         monthly_amount.amount /= split_pay_month;
+         FC_ASSERT(savings_balance >= monthly_amount);
+
+         adjust_balance( get_account( to ), monthly_amount );
+         adjust_savings_balance(get_account( to ), -monthly_amount);
+
+         push_virtual_operation( fill_transfer_savings_operation( from, to, monthly_amount, total_amount, split_pay_order, split_pay_month, request_id, to_string(memo) ) );
+         
+         remove( *itr );
+         itr = idx.begin();
+
+         create<savings_withdraw_object>( [&]( savings_withdraw_object& s ) {
+            s.from            = from;
+            s.to              = to;           
+            s.amount          = amount - monthly_amount;
+            s.total_amount    = total_amount;
+            s.split_pay_month = split_pay_month;
+            s.split_pay_order = split_pay_order + 1;
+#ifndef IS_LOW_MEM
+            s.memo            = memo;
+#endif
+            s.request_id      = request_id;
+            s.complete        = complete + FUTUREPIA_TRANSFER_SAVINGS_CYCLE;
+         });
       }
    }
 }
 
-share_type database::pay_reward_funds( share_type reward )
+void database::process_fund_withdraws()
 {
-   const auto& reward_idx = get_index< reward_fund_index, by_id >();
-   share_type used_rewards = 0;
+   const auto& idx = get_index< fund_withdraw_index >().indices().get< by_complete_from >();
+   auto itr = idx.begin();
+   while( itr != idx.end() ) {
+      
+      if( itr->complete > head_block_time() )
+         break;
 
-   for( auto itr = reward_idx.begin(); itr != reward_idx.end(); ++itr )
-   {
-      // reward is a per block reward and the percents are 16-bit. This should never overflow
-      auto r = ( reward * itr->percent_content_rewards ) / FUTUREPIA_100_PERCENT;
+      string fund_name = to_string(itr->fund_name);
+      asset  fund_balance = get_common_fund(fund_name).fund_balance;
+      if(fund_balance < itr->amount){
+         ilog( "process_fund_withdraws : lack of fund balance. fund_balance/required amount = ${balance}/${amount}", ("balance", fund_balance)("amount", itr->amount) );
+         return;
+      }
 
-      modify( *itr, [&]( reward_fund_object& rfo )
+      adjust_balance( get_account( itr->from ), itr->amount );
+      adjust_fund_balance(fund_name, -itr->amount);
+      adjust_fund_withdraw_balance(fund_name, -itr->amount);
+
+      modify( get_account( itr->from ), [&]( account_object& a )
       {
-         rfo.reward_balance += asset( r, FUTUREPIA_SYMBOL );
+         a.fund_withdraw_requests--;
       });
 
-      used_rewards += r;
-
-      // Sanity check to ensure we aren't printing more FPC than has been allocated through inflation
-      FC_ASSERT( used_rewards <= reward );
-   }
-
-   return used_rewards;
-}
-
-/**
- *  Iterates over all conversion requests with a conversion date before
- *  the head block time and then converts them to/from futurepia/fpch at the
- *  current median price feed history price times the premium
- */
-void database::process_conversions()
-{
-   auto now = head_block_time();
-   const auto& request_by_date = get_index< convert_request_index >().indices().get< by_conversion_date >();
-   auto itr = request_by_date.begin();
-
-   const auto& fhistory = get_feed_history();
-   if( fhistory.current_median_history.is_null() )
-      return;
-
-   asset net_fpch( 0, FPCH_SYMBOL );
-   asset net_futurepia( 0, FUTUREPIA_SYMBOL );
-
-   const auto supply_list = get_total_supply();
-   asset total_supply = supply_list.find( FUTUREPIA_SYMBOL )->second;
-   asset max_suuply = asset( FUTUREPIA_MAX_SUPPLY, FUTUREPIA_SYMBOL );
-
-   while( itr != request_by_date.end() && itr->conversion_date <= now )
-   {
-      const auto& user = get_account( itr->owner );
-      auto amount_to_issue = itr->amount * fhistory.current_median_history;
-
-      FC_ASSERT( total_supply + net_futurepia + amount_to_issue <= max_suuply
-         , "over max supply when conversion :  total_supply = ${total}, request: id = ${id}, amount = ${amount}"
-         , ( "total", total_supply.amount )( "id", itr->id )( "amount", itr->amount ) );
-
-      adjust_balance( user, amount_to_issue );
-
-      net_fpch   += itr->amount;
-      net_futurepia += amount_to_issue;
-
-      push_virtual_operation( fill_convert_request_operation ( user.name, itr->requestid, itr->amount, amount_to_issue ) );
+      push_virtual_operation( fill_staking_fund_operation( itr->from, fund_name, itr->amount, itr->request_id, to_string(itr->memo) ) );
 
       remove( *itr );
-      itr = request_by_date.begin();
+      itr = idx.begin();
    }
-
-   const auto& props = get_dynamic_global_properties();
-
-   modify( props, [&]( dynamic_global_property_object& p )
-   {
-       p.current_supply += net_futurepia;
-       p.current_fpch_supply -= net_fpch;
-       p.virtual_supply += net_futurepia;
-       p.virtual_supply -= net_fpch * get_feed_history().current_median_history;
-   } );
 }
 
-asset database::to_fpch( const asset& futurepia )const
+void database::process_exchange_withdraws()
 {
-   return util::to_fpch( get_feed_history().current_median_history, futurepia );
+   const auto& idx = get_index< exchange_withdraw_index >().indices().get< by_complete_from >();
+   auto itr = idx.begin();
+   while( itr != idx.end() ) {
+      
+      if( itr->complete > head_block_time() )
+         break;
+
+      const auto& owner  = get_account( itr->from );
+      const auto& fowner = get_account( FUTUREPIA_EXCHANGE_FEE_OWNER );
+      asset amount = itr->amount;
+
+      try
+      {
+         if ( amount.symbol == PIA_SYMBOL )
+         {
+            adjust_exchange_balance( owner, -amount );           
+            asset snac = to_snac( amount );
+
+            if (snac > FUTUREPIA_EXCHANGE_FEE)
+            {
+               snac -= FUTUREPIA_EXCHANGE_FEE;
+               adjust_balance( fowner, FUTUREPIA_EXCHANGE_FEE );
+            }
+            else
+            {   
+               ilog( "error! exchanged pia to snac value is negative !" );
+            }
+            adjust_balance( owner, snac );
+            adjust_supply( -amount );
+            adjust_supply( to_snac( amount ) );
+            push_virtual_operation( fill_exchange_operation( itr->from, snac, itr->request_id ) );
+         }
+         else if ( amount.symbol == SNAC_SYMBOL )
+         {
+            check_total_supply( amount );
+            adjust_exchange_balance( owner, -amount );
+            asset snac = amount;
+
+            if ( snac > FUTUREPIA_EXCHANGE_FEE)
+            {           
+               snac -= FUTUREPIA_EXCHANGE_FEE;
+               adjust_balance( fowner, FUTUREPIA_EXCHANGE_FEE );
+            }
+            else
+            {
+               ilog( "error! exchanged snac to pia value is negative !" );
+            }
+            adjust_balance( owner, to_pia( snac ) );
+            adjust_supply( -snac );
+            adjust_supply( to_pia( snac ) );
+            push_virtual_operation( fill_exchange_operation( itr->from, to_pia( snac ), itr->request_id ) );
+         }
+      } FC_CAPTURE_AND_RETHROW( (owner)(amount) )
+
+      modify( owner, [&]( account_object& a )
+      {
+         a.exchange_requests--;
+      });
+
+      remove( *itr );
+      itr = idx.begin();
+   }
 }
 
-asset database::to_futurepia( const asset& fpch )const
+asset database::to_snac( const asset& pia )const
 {
-   return util::to_futurepia( get_feed_history().current_median_history, fpch );
+   const auto& gpo = get_dynamic_global_properties();
+   return util::to_snac( gpo.snac_exchange_rate, pia );
+}
+
+asset database::to_pia( const asset& snac )const
+{
+   const auto& gpo = get_dynamic_global_properties();
+   return util::to_pia( gpo.snac_exchange_rate, snac );
 }
 
 void database::account_recovery_processing()
@@ -1350,22 +1254,26 @@ void database::account_recovery_processing()
    }
 }
 
-void database::expire_escrow_ratification()
+void database::process_decline_voting_rights()
 {
-   const auto& escrow_idx = get_index< escrow_index >().indices().get< by_ratification_deadline >();
-   auto escrow_itr = escrow_idx.lower_bound( false );
+   const auto& request_idx = get_index< decline_voting_rights_request_index >().indices().get< by_effective_date >();
+   auto itr = request_idx.begin();
 
-   while( escrow_itr != escrow_idx.end() && !escrow_itr->is_approved() && escrow_itr->ratification_deadline <= head_block_time() )
+   while( itr != request_idx.end() && itr->effective_date <= head_block_time() )
    {
-      const auto& old_escrow = *escrow_itr;
-      ++escrow_itr;
+      const auto& account = get(itr->account);
 
-      const auto& from_account = get_account( old_escrow.from );
-      adjust_balance( from_account, old_escrow.futurepia_balance );
-      adjust_balance( from_account, old_escrow.fpch_balance );
-      adjust_balance( from_account, old_escrow.pending_fee );
+      /// remove all current votes
 
-      remove( old_escrow );
+      clear_bobserver_votes( account );
+
+      modify( get(itr->account), [&]( account_object& a )
+      {
+         a.can_vote = false;
+      });
+
+      remove( *itr );
+      itr = request_idx.begin();
    }
 }
 
@@ -1396,36 +1304,41 @@ uint32_t database::last_non_undoable_block_num() const
 
 void database::initialize_evaluators()
 {
-   _my->_evaluator_registry.register_evaluator< transfer_evaluator                       >();
-   _my->_evaluator_registry.register_evaluator< account_create_evaluator                 >();
-   _my->_evaluator_registry.register_evaluator< account_update_evaluator                 >();
-   _my->_evaluator_registry.register_evaluator< custom_evaluator                         >();
-   _my->_evaluator_registry.register_evaluator< custom_binary_evaluator                  >();
-   _my->_evaluator_registry.register_evaluator< custom_json_evaluator                    >();
-   _my->_evaluator_registry.register_evaluator< pow_evaluator                            >();
-   _my->_evaluator_registry.register_evaluator< pow2_evaluator                           >();
-   _my->_evaluator_registry.register_evaluator< feed_publish_evaluator                   >();
-   _my->_evaluator_registry.register_evaluator< convert_evaluator                        >();
-   _my->_evaluator_registry.register_evaluator< limit_order_create_evaluator             >();
-   _my->_evaluator_registry.register_evaluator< limit_order_create2_evaluator            >();
-   _my->_evaluator_registry.register_evaluator< limit_order_cancel_evaluator             >();
-   _my->_evaluator_registry.register_evaluator< challenge_authority_evaluator            >();
-   _my->_evaluator_registry.register_evaluator< prove_authority_evaluator                >();
-   _my->_evaluator_registry.register_evaluator< request_account_recovery_evaluator       >();
-   _my->_evaluator_registry.register_evaluator< recover_account_evaluator                >();
-   _my->_evaluator_registry.register_evaluator< change_recovery_account_evaluator        >();
-   _my->_evaluator_registry.register_evaluator< escrow_transfer_evaluator                >();
-   _my->_evaluator_registry.register_evaluator< escrow_approve_evaluator                 >();
-   _my->_evaluator_registry.register_evaluator< escrow_dispute_evaluator                 >();
-   _my->_evaluator_registry.register_evaluator< escrow_release_evaluator                 >();
-   _my->_evaluator_registry.register_evaluator< transfer_to_savings_evaluator            >();
-   _my->_evaluator_registry.register_evaluator< transfer_from_savings_evaluator          >();
-   _my->_evaluator_registry.register_evaluator< cancel_transfer_from_savings_evaluator   >();
-   _my->_evaluator_registry.register_evaluator< decline_voting_rights_evaluator          >();
-   _my->_evaluator_registry.register_evaluator< reset_account_evaluator                  >();
-   _my->_evaluator_registry.register_evaluator< set_reset_account_evaluator              >();
-   _my->_evaluator_registry.register_evaluator< claim_reward_balance_evaluator           >();
-   _my->_evaluator_registry.register_evaluator< account_create_with_delegation_evaluator >();
+   _my->_evaluator_registry.register_evaluator< comment_vote_evaluator                       >();
+   _my->_evaluator_registry.register_evaluator< comment_evaluator                            >();
+   _my->_evaluator_registry.register_evaluator< comment_betting_state_evaluator              >();
+   _my->_evaluator_registry.register_evaluator< delete_comment_evaluator                     >();
+   _my->_evaluator_registry.register_evaluator< transfer_evaluator                           >();
+   _my->_evaluator_registry.register_evaluator< account_create_evaluator                     >();
+   _my->_evaluator_registry.register_evaluator< account_update_evaluator                     >();
+   _my->_evaluator_registry.register_evaluator< bobserver_update_evaluator                   >();
+   _my->_evaluator_registry.register_evaluator< account_bobserver_vote_evaluator             >();
+   _my->_evaluator_registry.register_evaluator< custom_evaluator                             >();
+   _my->_evaluator_registry.register_evaluator< custom_binary_evaluator                      >();
+   _my->_evaluator_registry.register_evaluator< custom_json_evaluator                        >();
+   _my->_evaluator_registry.register_evaluator< convert_evaluator                            >();
+   _my->_evaluator_registry.register_evaluator< request_account_recovery_evaluator           >();
+   _my->_evaluator_registry.register_evaluator< recover_account_evaluator                    >();
+   _my->_evaluator_registry.register_evaluator< change_recovery_account_evaluator            >();
+   _my->_evaluator_registry.register_evaluator< transfer_savings_evaluator                   >();
+   _my->_evaluator_registry.register_evaluator< cancel_transfer_savings_evaluator            >();
+   _my->_evaluator_registry.register_evaluator< conclusion_transfer_savings_evaluator        >();
+   _my->_evaluator_registry.register_evaluator< decline_voting_rights_evaluator              >();
+   _my->_evaluator_registry.register_evaluator< reset_account_evaluator                      >();
+   _my->_evaluator_registry.register_evaluator< set_reset_account_evaluator                  >();
+   _my->_evaluator_registry.register_evaluator< account_bproducer_appointment_evaluator      >();
+   _my->_evaluator_registry.register_evaluator< except_bobserver_evaluator                   >();
+   _my->_evaluator_registry.register_evaluator< print_evaluator                              >();
+   _my->_evaluator_registry.register_evaluator< exchange_rate_evaluator                      >();
+   _my->_evaluator_registry.register_evaluator< comment_betting_evaluator                    >();
+   _my->_evaluator_registry.register_evaluator< burn_evaluator                               >();
+   _my->_evaluator_registry.register_evaluator< staking_fund_evaluator                       >();
+   _my->_evaluator_registry.register_evaluator< conclusion_staking_evaluator                 >();
+   _my->_evaluator_registry.register_evaluator< transfer_fund_evaluator                      >();
+   _my->_evaluator_registry.register_evaluator< set_fund_interest_evaluator                  >();
+   _my->_evaluator_registry.register_evaluator< exchange_evaluator                           >();
+   _my->_evaluator_registry.register_evaluator< cancel_exchange_evaluator                    >();
+   _my->_evaluator_registry.register_evaluator< custom_json_hf2_evaluator                    >();
 }
 
 void database::set_custom_operation_interpreter( const std::string& id, std::shared_ptr< custom_operation_interpreter > registry )
@@ -1435,7 +1348,7 @@ void database::set_custom_operation_interpreter( const std::string& id, std::sha
    FC_ASSERT( inserted );
 }
 
-std::shared_ptr< custom_operation_interpreter > database::get_custom_json_evaluator( const std::string& id )
+std::shared_ptr< custom_operation_interpreter > database::get_custom_evaluator( const std::string& id )
 {
    auto it = _custom_operation_interpreters.find( id );
    if( it != _custom_operation_interpreters.end() )
@@ -1448,24 +1361,27 @@ void database::initialize_indexes()
    add_core_index< dynamic_global_property_index           >(*this);
    add_core_index< account_index                           >(*this);
    add_core_index< account_authority_index                 >(*this);
-   add_core_index< bobserver_index                           >(*this);
+   add_core_index< bobserver_index                         >(*this);
    add_core_index< transaction_index                       >(*this);
    add_core_index< block_summary_index                     >(*this);
-   add_core_index< bobserver_schedule_index                  >(*this);
-   add_core_index< limit_order_index                       >(*this);
-   add_core_index< feed_history_index                      >(*this);
-   add_core_index< convert_request_index                   >(*this);
-   add_core_index< liquidity_reward_balance_index          >(*this);
+   add_core_index< bobserver_schedule_index                >(*this);
+   add_core_index< comment_index                           >(*this);
+   add_core_index< comment_vote_index                      >(*this);
+   add_core_index< bobserver_vote_index                    >(*this);
    add_core_index< operation_index                         >(*this);
    add_core_index< account_history_index                   >(*this);
    add_core_index< hardfork_property_index                 >(*this);
    add_core_index< owner_authority_history_index           >(*this);
    add_core_index< account_recovery_request_index          >(*this);
    add_core_index< change_recovery_account_request_index   >(*this);
-   add_core_index< escrow_index                            >(*this);
    add_core_index< savings_withdraw_index                  >(*this);
    add_core_index< decline_voting_rights_request_index     >(*this);
-   add_core_index< reward_fund_index                       >(*this);
+   add_core_index< common_fund_index                       >(*this);
+   add_core_index< comment_betting_state_index             >(*this);
+   add_core_index< comment_betting_index                   >(*this);
+   add_core_index< fund_withdraw_index                     >(*this);
+   add_core_index< exchange_withdraw_index                 >(*this);
+   add_core_index< dapp_reward_fund_index                  >(*this);
 
    _plugin_index_signal();
 }
@@ -1593,7 +1509,7 @@ void database::init_genesis( uint64_t init_supply )
          {
             a.name = FUTUREPIA_INIT_MINER_NAME + ( i ? fc::to_string( i ) : std::string() );
             a.memo_key = init_public_key;
-            a.balance  = asset( i ? 0 : init_supply, FUTUREPIA_SYMBOL );
+            a.balance  = asset( i ? 0 : init_supply, PIA_SYMBOL );
          } );
 
          create< account_authority_object >( [&]( account_authority_object& auth )
@@ -1607,9 +1523,8 @@ void database::init_genesis( uint64_t init_supply )
 
          create< bobserver_object >( [&]( bobserver_object& w )
          {
-            w.owner        = FUTUREPIA_INIT_MINER_NAME + ( i ? fc::to_string(i) : std::string() );
+            w.account      = FUTUREPIA_INIT_MINER_NAME + ( i ? fc::to_string(i) : std::string() );
             w.signing_key  = init_public_key;
-            w.schedule = bobserver_object::miner;
          } );
       }
 
@@ -1619,13 +1534,12 @@ void database::init_genesis( uint64_t init_supply )
          p.time = FUTUREPIA_GENESIS_TIME;
          p.recent_slots_filled = fc::uint128::max_value();
          p.participation_count = 128;
-         p.current_supply = asset( init_supply, FUTUREPIA_SYMBOL );
+         p.current_supply = asset( init_supply, PIA_SYMBOL );
          p.virtual_supply = p.current_supply;
          p.maximum_block_size = FUTUREPIA_MAX_BLOCK_SIZE;
+         p.dapp_transaction_fee = FUTUREPIA_DAPP_TRANSACTION_FEE;
       } );
 
-      // Nothing to do
-      create< feed_history_object >( [&]( feed_history_object& o ) {});
       for( int i = 0; i < 0x10000; i++ )
          create< block_summary_object >( [&]( block_summary_object& ) {});
       create< hardfork_property_object >( [&](hardfork_property_object& hpo )
@@ -1638,19 +1552,9 @@ void database::init_genesis( uint64_t init_supply )
       {
          wso.current_shuffled_bobservers[0] = FUTUREPIA_INIT_MINER_NAME;
       } );
+
    }
    FC_CAPTURE_AND_RETHROW()
-}
-
-
-void database::validate_transaction( const signed_transaction& trx )
-{
-   database::with_write_lock( [&]()
-   {
-      auto session = start_undo_session( true );
-      _apply_transaction( trx );
-      session.undo();
-   });
 }
 
 void database::notify_changed_objects()
@@ -1800,10 +1704,10 @@ void database::_apply_block( const signed_block& next_block )
       }
       catch( fc::assert_exception& e )
       {
-         const auto& merkle_map = get_shared_db_merkle();
-         auto itr = merkle_map.find( next_block_num );
+         // const auto& merkle_map = get_shared_db_merkle();
+         // auto itr = merkle_map.find( next_block_num );
 
-         if( itr == merkle_map.end() || itr->second != merkle_root )
+         // if( itr == merkle_map.end() || itr->second != merkle_root )
             throw e;
       }
    }
@@ -1812,6 +1716,7 @@ void database::_apply_block( const signed_block& next_block )
 
    _current_block_num    = next_block_num;
    _current_trx_in_block = 0;
+   _current_virtual_op   = 0;
 
    const auto& gprops = get_dynamic_global_properties();
    auto block_size = fc::raw::pack_size( next_block );
@@ -1834,17 +1739,6 @@ void database::_apply_block( const signed_block& next_block )
    /// parse bobserver version reporting
    process_header_extensions( next_block );
 
-   // [[ pminj97 : 2018-07-25 : in case of reindexing, below code occure error
-   /*
-   const auto& bobserver = get_bobserver( next_block.bobserver );
-   const auto& hardfork_state = get_hardfork_property_object();
-   FC_ASSERT( bobserver.running_version >= hardfork_state.current_hardfork_version,
-      "Block produced by bobserver that is not running current hardfork",
-      ("bobserver",bobserver)("next_block.bobserver",next_block.bobserver)("hardfork_state", hardfork_state)
-   );
-   */
-  // ]] pminj97 : 2018-07-25 : in case of reindexing, below code occure error
-
    for( const auto& trx : next_block.transactions )
    {
       /* We do not need to push the undo state for each transaction
@@ -1857,6 +1751,8 @@ void database::_apply_block( const signed_block& next_block )
       ++_current_trx_in_block;
    }
 
+   _current_virtual_op   = 0;
+
    update_global_dynamic_data(next_block);
    update_signing_bobserver(signing_bobserver, next_block);
 
@@ -1864,7 +1760,7 @@ void database::_apply_block( const signed_block& next_block )
 
    create_block_summary(next_block);
    clear_expired_transactions();
-   clear_expired_orders();
+
    update_bobserver_schedule(*this);
 
    update_median_feed();
@@ -1872,13 +1768,13 @@ void database::_apply_block( const signed_block& next_block )
 
    clear_null_account_balance();
    process_funds();
-   process_conversions();
    process_savings_withdraws();
-   pay_liquidity_reward();
+   process_fund_withdraws();
+   process_exchange_withdraws();
    update_virtual_supply();
 
    account_recovery_processing();
-   expire_escrow_ratification();
+   process_decline_voting_rights();
 
    process_hardforks();
 
@@ -1938,65 +1834,6 @@ void database::process_header_extensions( const signed_block& next_block )
    }
 }
 
-
-
-void database::update_median_feed() {
-try {
-   if( (head_block_num() % FUTUREPIA_FEED_INTERVAL_BLOCKS) != 0 )
-      return;
-
-   auto now = head_block_time();
-   const bobserver_schedule_object& wso = get_bobserver_schedule_object();
-   vector<price> feeds; feeds.reserve( wso.num_scheduled_bobservers );
-   for( int i = 0; i < wso.num_scheduled_bobservers; i++ )
-   {
-      const auto& wit = get_bobserver( wso.current_shuffled_bobservers[i] );
-      if( now < wit.last_fpch_exchange_update + FUTUREPIA_MAX_FEED_AGE_SECONDS
-         && !wit.fpch_exchange_rate.is_null() )
-      {
-         feeds.push_back( wit.fpch_exchange_rate );
-      }
-   }
-
-   if( feeds.size() >= FUTUREPIA_MIN_FEEDS )
-   {
-      std::sort( feeds.begin(), feeds.end() );
-      auto median_feed = feeds[feeds.size()/2];
-
-      modify( get_feed_history(), [&]( feed_history_object& fho )
-      {
-         fho.price_history.push_back( median_feed );
-         size_t futurepia_feed_history_window = FUTUREPIA_FEED_HISTORY_WINDOW_PRE_HF_16;
-         futurepia_feed_history_window = FUTUREPIA_FEED_HISTORY_WINDOW;
-
-         if( fho.price_history.size() > futurepia_feed_history_window )
-            fho.price_history.pop_front();
-
-         if( fho.price_history.size() )
-         {
-            std::deque< price > copy;
-            for( auto i : fho.price_history )
-            {
-               copy.push_back( i );
-            }
-
-            std::sort( copy.begin(), copy.end() ); /// TODO: use nth_item
-            fho.current_median_history = copy[copy.size()/2];
-
-#ifdef IS_TEST_NET
-            if( skip_price_feed_limit_check )
-               return;
-#endif
-            const auto& gpo = get_dynamic_global_properties();
-            price min_price( asset( 9 * gpo.current_fpch_supply.amount, FPCH_SYMBOL ), gpo.current_supply ); // This price limits FPCH to 10% market cap
-
-            if( min_price > fho.current_median_history )
-               fho.current_median_history = min_price;
-         }
-      });
-   }
-} FC_CAPTURE_AND_RETHROW() }
-
 void database::apply_transaction(const signed_transaction& trx, uint32_t skip)
 {
    detail::with_skip_flags( *this, skip, [&]() { _apply_transaction(trx); });
@@ -2006,6 +1843,7 @@ void database::apply_transaction(const signed_transaction& trx, uint32_t skip)
 void database::_apply_transaction(const signed_transaction& trx)
 { try {
    _current_trx_id = trx.id();
+   _current_virtual_op   = 0;
    uint32_t skip = get_node_properties().skip_flags;
 
    if( !(skip&skip_validate) )   /* issue #505 explains why this skip_flag is disabled */
@@ -2031,7 +1869,7 @@ void database::_apply_transaction(const signed_transaction& trx)
       }
       catch( protocol::tx_missing_active_auth& e )
       {
-         if( get_shared_db_merkle().find( head_block_num() + 1 ) == get_shared_db_merkle().end() )
+         // if( get_shared_db_merkle().find( head_block_num() + 1 ) == get_shared_db_merkle().end() )
             throw e;
       }
    }
@@ -2072,10 +1910,11 @@ void database::_apply_transaction(const signed_transaction& trx)
    //Finally process the operations
    _current_op_in_trx = 0;
    for( const auto& op : trx.operations )
-   { try {
-      apply_operation(op);
-      ++_current_op_in_trx;
-     } FC_CAPTURE_AND_RETHROW( (op) );
+   { 
+      try {
+         apply_operation(op);
+         ++_current_op_in_trx;
+      } FC_CAPTURE_AND_RETHROW( (op) );
    }
    _current_trx_id = transaction_id_type();
 
@@ -2105,7 +1944,7 @@ const bobserver_object& database::validate_block_header( uint32_t skip, const si
 
       string scheduled_bobserver = get_scheduled_bobserver( slot_num );
 
-      FC_ASSERT( bobserver.owner == scheduled_bobserver, "BObserver produced block at wrong time",
+      FC_ASSERT( bobserver.account == scheduled_bobserver, "Bobserver produced block at wrong time",
                  ("block bobserver",next_block.bobserver)("scheduled",scheduled_bobserver)("slot_num",slot_num) );
    }
 
@@ -2134,16 +1973,11 @@ void database::update_global_dynamic_data( const signed_block& b )
       for( uint32_t i = 0; i < missed_blocks; ++i )
       {
          const auto& bobserver_missed = get_bobserver( get_scheduled_bobserver( i + 1 ) );
-         if(  bobserver_missed.owner != b.bobserver )
+         if(  bobserver_missed.account != b.bobserver )
          {
             modify( bobserver_missed, [&]( bobserver_object& w )
             {
                w.total_missed++;
-               if( head_block_num() - w.last_confirmed_block_num  > FUTUREPIA_BLOCKS_PER_DAY )
-               {
-                  w.signing_key = public_key_type();
-                  push_virtual_operation( shutdown_bobserver_operation( w.owner ) );
-               }
             } );
          }
       }
@@ -2176,27 +2010,41 @@ void database::update_global_dynamic_data( const signed_block& b )
    }
 } FC_CAPTURE_AND_RETHROW() }
 
+void database::update_median_feed() 
+{ try {
+   if(has_hardfork(FUTUREPIA_HARDFORK_0_2))
+   {
+      if( (head_block_num() % FUTUREPIA_FEED_INTERVAL_BLOCKS) != 0 )
+         return;
+
+      auto now = head_block_time();
+      const bobserver_schedule_object& bso = get_bobserver_schedule_object();
+      vector<price> feeds; feeds.reserve( bso.num_scheduled_bobservers );
+      for( int i = 0; i < bso.num_scheduled_bobservers; i++ )
+      {
+         const auto& bo = get_bobserver( bso.current_shuffled_bobservers[i] );
+         if( now < bo.last_snac_exchange_update + FUTUREPIA_MAX_FEED_AGE_SECONDS
+            && !bo.snac_exchange_rate.is_null() && bo.is_bproducer )
+         {
+            feeds.push_back( bo.snac_exchange_rate );
+         }
+      }
+
+      if( feeds.size() >= FUTUREPIA_MIN_FEEDS )
+      {
+         std::sort( feeds.begin(), feeds.end() );
+         auto median_feed = feeds[feeds.size()/2];
+         check_virtual_supply(median_feed);
+         adjust_exchange_rate(median_feed);
+      }
+   }
+} FC_CAPTURE_AND_RETHROW() }
+
 void database::update_virtual_supply()
 { try {
    modify( get_dynamic_global_properties(), [&]( dynamic_global_property_object& dgp )
    {
-      dgp.virtual_supply = dgp.current_supply
-         + ( get_feed_history().current_median_history.is_null() ? asset( 0, FUTUREPIA_SYMBOL ) : dgp.current_fpch_supply * get_feed_history().current_median_history );
-
-      auto median_price = get_feed_history().current_median_history;
-
-      if( !median_price.is_null() )
-      {
-         auto percent_fpch = uint16_t( ( ( fc::uint128_t( ( dgp.current_fpch_supply * get_feed_history().current_median_history ).amount.value ) * FUTUREPIA_100_PERCENT )
-            / dgp.virtual_supply.amount.value ).to_uint64() );
-
-         if( percent_fpch <= FUTUREPIA_FPCH_START_PERCENT )
-            dgp.fpch_print_rate = FUTUREPIA_100_PERCENT;
-         else if( percent_fpch >= FUTUREPIA_FPCH_STOP_PERCENT )
-            dgp.fpch_print_rate = 0;
-         else
-            dgp.fpch_print_rate = ( ( FUTUREPIA_FPCH_STOP_PERCENT - percent_fpch ) * FUTUREPIA_100_PERCENT ) / ( FUTUREPIA_FPCH_STOP_PERCENT - FUTUREPIA_FPCH_START_PERCENT );
-      }
+      dgp.virtual_supply = dgp.current_supply + to_pia(dgp.current_snac_supply);
    });
 } FC_CAPTURE_AND_RETHROW() }
 
@@ -2293,160 +2141,6 @@ void database::update_last_irreversible_block()
    _fork_db.set_max_size( dpo.head_block_number - dpo.last_irreversible_block_num + 1 );
 } FC_CAPTURE_AND_RETHROW() }
 
-
-bool database::apply_order( const limit_order_object& new_order_object )
-{
-   auto order_id = new_order_object.id;
-
-   const auto& limit_price_idx = get_index<limit_order_index>().indices().get<by_price>();
-
-   auto max_price = ~new_order_object.sell_price;
-   auto limit_itr = limit_price_idx.lower_bound(max_price.max());
-   auto limit_end = limit_price_idx.upper_bound(max_price);
-
-   bool finished = false;
-   while( !finished && limit_itr != limit_end )
-   {
-      auto old_limit_itr = limit_itr;
-      ++limit_itr;
-      // match returns 2 when only the old order was fully filled. In this case, we keep matching; otherwise, we stop.
-      finished = ( match(new_order_object, *old_limit_itr, old_limit_itr->sell_price) & 0x1 );
-   }
-
-   return find< limit_order_object >( order_id ) == nullptr;
-}
-
-int database::match( const limit_order_object& new_order, const limit_order_object& old_order, const price& match_price )
-{
-   assert( new_order.sell_price.quote.symbol == old_order.sell_price.base.symbol );
-   assert( new_order.sell_price.base.symbol  == old_order.sell_price.quote.symbol );
-   assert( new_order.for_sale > 0 && old_order.for_sale > 0 );
-   assert( match_price.quote.symbol == new_order.sell_price.base.symbol );
-   assert( match_price.base.symbol == old_order.sell_price.base.symbol );
-
-   auto new_order_for_sale = new_order.amount_for_sale();
-   auto old_order_for_sale = old_order.amount_for_sale();
-
-   asset new_order_pays, new_order_receives, old_order_pays, old_order_receives;
-
-   if( new_order_for_sale <= old_order_for_sale * match_price )
-   {
-      old_order_receives = new_order_for_sale;
-      new_order_receives  = new_order_for_sale * match_price;
-   }
-   else
-   {
-      //This line once read: assert( old_order_for_sale < new_order_for_sale * match_price );
-      //This assert is not always true -- see trade_amount_equals_zero in operation_tests.cpp
-      //Although new_order_for_sale is greater than old_order_for_sale * match_price, old_order_for_sale == new_order_for_sale * match_price
-      //Removing the assert seems to be safe -- apparently no asset is created or destroyed.
-      new_order_receives = old_order_for_sale;
-      old_order_receives = old_order_for_sale * match_price;
-   }
-
-   old_order_pays = new_order_receives;
-   new_order_pays = old_order_receives;
-
-   assert( new_order_pays == new_order.amount_for_sale() ||
-           old_order_pays == old_order.amount_for_sale() );
-
-   push_virtual_operation( fill_order_operation( new_order.seller, new_order.orderid, new_order_pays, old_order.seller, old_order.orderid, old_order_pays ) );
-
-   int result = 0;
-   result |= fill_order( new_order, new_order_pays, new_order_receives );
-   result |= fill_order( old_order, old_order_pays, old_order_receives ) << 1;
-   assert( result != 0 );
-   return result;
-}
-
-
-void database::adjust_liquidity_reward( const account_object& owner, const asset& volume, bool is_sdb )
-{
-   const auto& ridx = get_index< liquidity_reward_balance_index >().indices().get< by_owner >();
-   auto itr = ridx.find( owner.id );
-   if( itr != ridx.end() )
-   {
-      modify<liquidity_reward_balance_object>( *itr, [&]( liquidity_reward_balance_object& r )
-      {
-         if( head_block_time() - r.last_update >= FUTUREPIA_LIQUIDITY_TIMEOUT_SEC )
-         {
-            r.fpch_volume = 0;
-            r.futurepia_volume = 0;
-            r.weight = 0;
-         }
-
-         if( is_sdb )
-            r.fpch_volume += volume.amount.value;
-         else
-            r.futurepia_volume += volume.amount.value;
-
-         r.update_weight( true );
-         r.last_update = head_block_time();
-      } );
-   }
-   else
-   {
-      create<liquidity_reward_balance_object>( [&](liquidity_reward_balance_object& r )
-      {
-         r.owner = owner.id;
-         if( is_sdb )
-            r.fpch_volume = volume.amount.value;
-         else
-            r.futurepia_volume = volume.amount.value;
-
-         r.update_weight( true );
-         r.last_update = head_block_time();
-      } );
-   }
-}
-
-
-bool database::fill_order( const limit_order_object& order, const asset& pays, const asset& receives )
-{
-   try
-   {
-      FC_ASSERT( order.amount_for_sale().symbol == pays.symbol );
-      FC_ASSERT( pays.symbol != receives.symbol );
-
-      const account_object& seller = get_account( order.seller );
-
-      adjust_balance( seller, receives );
-
-      if( pays == order.amount_for_sale() )
-      {
-         remove( order );
-         return true;
-      }
-      else
-      {
-         modify( order, [&]( limit_order_object& b )
-         {
-            b.for_sale -= pays.amount;
-         } );
-         /**
-          *  There are times when the AMOUNT_FOR_SALE * SALE_PRICE == 0 which means that we
-          *  have hit the limit where the seller is asking for nothing in return.  When this
-          *  happens we must refund any balance back to the seller, it is too small to be
-          *  sold at the sale price.
-          */
-         if( order.amount_to_receive().amount == 0 )
-         {
-            cancel_order(order);
-            return true;
-         }
-         return false;
-      }
-   }
-   FC_CAPTURE_AND_RETHROW( (order)(pays)(receives) )
-}
-
-void database::cancel_order( const limit_order_object& order )
-{
-   adjust_balance( get_account(order.seller), order.amount_for_sale() );
-   remove(order);
-}
-
-
 void database::clear_expired_transactions()
 {
    //Look for expired transactions in the deduplication list, and remove them.
@@ -2457,16 +2151,41 @@ void database::clear_expired_transactions()
       remove( *dedupe_index.begin() );
 }
 
-void database::clear_expired_orders()
+void database::check_total_supply(const asset& delta )
 {
-   auto now = head_block_time();
-   const auto& orders_by_exp = get_index<limit_order_index>().indices().get<by_expiration>();
-   auto itr = orders_by_exp.begin();
-   while( itr != orders_by_exp.end() && itr->expiration < now )
-   {
-      cancel_order( *itr );
-      itr = orders_by_exp.begin();
+   const auto supply_list = get_total_supply();
+   asset total_supply = supply_list.find( PIA_SYMBOL )->second;
+
+   asset max_supply = asset( 0, PIA_SYMBOL );
+   if( has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ) {
+      max_supply = asset( INT64_MAX, PIA_SYMBOL );
    }
+   else if( has_hardfork( FUTUREPIA_HARDFORK_0_1 ) ) {
+      max_supply = asset( FUTUREPIA_MAX_SUPPLY, PIA_SYMBOL );
+   }
+   
+   const auto pia = ( delta.symbol != PIA_SYMBOL ) 
+      ? ( ( delta.amount.value >= 0 ) ? to_pia( delta ) : -( to_pia( -delta ) ) )
+      : delta;
+
+   FC_ASSERT( total_supply + pia <= max_supply && total_supply + pia > asset( 0, PIA_SYMBOL )
+      , "over max supply when adjust supply  total_supply = ${total}, delta = ${delta}"
+      , ( "total", total_supply.amount )( "delta", delta.amount )
+      );
+}
+
+void database::check_virtual_supply(const price& p)
+{
+   auto gpo = get_dynamic_global_properties();   
+   FC_ASSERT(gpo.current_supply + util::to_pia( p, gpo.current_snac_supply ) <= asset(INT64_MAX, PIA_SYMBOL));
+   FC_ASSERT(gpo.current_supply + util::to_pia( p, gpo.current_snac_supply ) >= asset(0, PIA_SYMBOL));
+}
+
+void database::check_virtual_supply(const asset& delta)
+{
+   auto gpo = get_dynamic_global_properties();   
+   FC_ASSERT(gpo.virtual_supply + to_pia( delta ) <= asset(INT64_MAX, PIA_SYMBOL));
+   FC_ASSERT(gpo.virtual_supply + to_pia( delta ) >= asset(0, PIA_SYMBOL));
 }
 
 void database::adjust_balance( const account_object& a, const asset& delta )
@@ -2475,44 +2194,17 @@ void database::adjust_balance( const account_object& a, const asset& delta )
    {
       switch( delta.symbol )
       {
-         case FUTUREPIA_SYMBOL:
+         case PIA_SYMBOL:
             acnt.balance += delta;
             break;
-         case FPCH_SYMBOL:
-            if( a.fpch_seconds_last_update != head_block_time() )
-            {
-               acnt.fpch_seconds += fc::uint128_t(a.fpch_balance.amount.value) * (head_block_time() - a.fpch_seconds_last_update).to_seconds();
-               acnt.fpch_seconds_last_update = head_block_time();
-
-               if( acnt.fpch_seconds > 0 &&
-                   (acnt.fpch_seconds_last_update - acnt.fpch_last_interest_payment).to_seconds() > FUTUREPIA_FPCH_INTEREST_COMPOUND_INTERVAL_SEC )
-               {
-                  auto interest = acnt.fpch_seconds / FUTUREPIA_SECONDS_PER_YEAR;
-                  interest *= get_dynamic_global_properties().fpch_interest_rate;
-                  interest /= FUTUREPIA_100_PERCENT;
-                  asset interest_paid(interest.to_uint64(), FPCH_SYMBOL);
-                  acnt.fpch_balance += interest_paid;
-                  acnt.fpch_seconds = 0;
-                  acnt.fpch_last_interest_payment = head_block_time();
-
-                  if(interest > 0)
-                     push_virtual_operation( interest_operation( a.name, interest_paid ) );
-
-                  modify( get_dynamic_global_properties(), [&]( dynamic_global_property_object& props)
-                  {
-                     props.current_fpch_supply += interest_paid;
-                     props.virtual_supply += interest_paid * get_feed_history().current_median_history;
-                  } );
-               }
-            }
-            acnt.fpch_balance += delta;
+         case SNAC_SYMBOL:
+            acnt.snac_balance += delta;
             break;
          default:
             FC_ASSERT( false, "invalid symbol" );
       }
    } );
 }
-
 
 void database::adjust_savings_balance( const account_object& a, const asset& delta )
 {
@@ -2520,37 +2212,11 @@ void database::adjust_savings_balance( const account_object& a, const asset& del
    {
       switch( delta.symbol )
       {
-         case FUTUREPIA_SYMBOL:
+         case PIA_SYMBOL:
             acnt.savings_balance += delta;
             break;
-         case FPCH_SYMBOL:
-            if( a.savings_fpch_seconds_last_update != head_block_time() )
-            {
-               acnt.savings_fpch_seconds += fc::uint128_t(a.savings_fpch_balance.amount.value) * (head_block_time() - a.savings_fpch_seconds_last_update).to_seconds();
-               acnt.savings_fpch_seconds_last_update = head_block_time();
-
-               if( acnt.savings_fpch_seconds > 0 &&
-                   (acnt.savings_fpch_seconds_last_update - acnt.savings_fpch_last_interest_payment).to_seconds() > FUTUREPIA_FPCH_INTEREST_COMPOUND_INTERVAL_SEC )
-               {
-                  auto interest = acnt.savings_fpch_seconds / FUTUREPIA_SECONDS_PER_YEAR;
-                  interest *= get_dynamic_global_properties().fpch_interest_rate;
-                  interest /= FUTUREPIA_100_PERCENT;
-                  asset interest_paid(interest.to_uint64(), FPCH_SYMBOL);
-                  acnt.savings_fpch_balance += interest_paid;
-                  acnt.savings_fpch_seconds = 0;
-                  acnt.savings_fpch_last_interest_payment = head_block_time();
-
-                  if(interest > 0)
-                     push_virtual_operation( interest_operation( a.name, interest_paid ) );
-
-                  modify( get_dynamic_global_properties(), [&]( dynamic_global_property_object& props)
-                  {
-                     props.current_fpch_supply += interest_paid;
-                     props.virtual_supply += interest_paid * get_feed_history().current_median_history;
-                  } );
-               }
-            }
-            acnt.savings_fpch_balance += delta;
+         case SNAC_SYMBOL:
+            acnt.savings_snac_balance += delta;
             break;
          default:
             FC_ASSERT( !"invalid symbol" );
@@ -2558,71 +2224,154 @@ void database::adjust_savings_balance( const account_object& a, const asset& del
    } );
 }
 
-
-void database::adjust_reward_balance( const account_object& a, const asset& delta )
+void database::adjust_exchange_balance( const account_object& a, const asset& delta )
 {
    modify( a, [&]( account_object& acnt )
    {
       switch( delta.symbol )
       {
-         case FUTUREPIA_SYMBOL:
-            acnt.reward_futurepia_balance += delta;
+         case PIA_SYMBOL:
+            acnt.exchange_balance += delta;
             break;
-         case FPCH_SYMBOL:
-            acnt.reward_fpch_balance += delta;
+         case SNAC_SYMBOL:
+            acnt.exchange_snac_balance += delta;
             break;
          default:
-            FC_ASSERT( false, "invalid symbol" );
+            FC_ASSERT( !"invalid symbol" );
       }
-   });
-}
-
-
-void database::adjust_supply( const asset& delta/*, bool adjust_vesting */)
-{
+   } );
 
    const auto& props = get_dynamic_global_properties();
-
-   const auto supply_list = get_total_supply();
-   asset total_supply = supply_list.find( FUTUREPIA_SYMBOL )->second;
-   asset max_suuply = asset( FUTUREPIA_MAX_SUPPLY, FUTUREPIA_SYMBOL );
-
-   FC_ASSERT( total_supply + delta <= max_suuply
-      , "over max supply when adjust supply  total_supply = ${total}, delta = ${delta}"
-      , ( "total", total_supply.amount )( "delta", delta.amount )
-      );
-
    modify( props, [&]( dynamic_global_property_object& props )
    {
       switch( delta.symbol )
       {
-         case FUTUREPIA_SYMBOL:
+         case PIA_SYMBOL:
          {
-            props.current_supply += delta;
-            props.virtual_supply += delta;
-            assert( props.current_supply.amount.value >= 0 );
+            props.total_exchange_request_pia += delta;
             break;
          }
-         case FPCH_SYMBOL:
-            props.current_fpch_supply += delta;
-            props.virtual_supply = props.current_fpch_supply * get_feed_history().current_median_history + props.current_supply;
-            assert( props.current_fpch_supply.amount.value >= 0 );
+         case SNAC_SYMBOL:
+         {        
+            props.total_exchange_request_snac += delta;
             break;
+         }
          default:
             FC_ASSERT( false, "invalid symbol" );
       }
    } );
 }
 
+void database::adjust_fund_balance( const string name, const asset& delta )
+{
+   modify( get< common_fund_object, by_name >( name ), [&]( common_fund_object &cfo )
+   {
+      switch( delta.symbol )
+      {
+         case PIA_SYMBOL:
+            cfo.fund_balance += delta;
+            break;
+         default:
+            FC_ASSERT( !"invalid symbol" );
+      }
+   });
+}
+
+void database::adjust_fund_withdraw_balance( const string name, const asset& delta )
+{
+   modify( get< common_fund_object, by_name >( name ), [&]( common_fund_object &cfo )
+   {
+      switch( delta.symbol )
+      {
+         case PIA_SYMBOL:
+            cfo.fund_withdraw_ready += delta;
+            break;
+         default:
+            FC_ASSERT( !"invalid symbol" );
+      }
+   });
+}
+
+void database::adjust_dapp_reward_fund_balance ( const asset& delta )
+{
+   modify( get(dapp_reward_fund_id_type()), [&]( dapp_reward_fund_object &object )
+   {
+      switch( delta.symbol )
+      {
+         case SNAC_SYMBOL:
+            object.fund_balance += delta;
+            object.last_update = head_block_time();
+            break;
+         default:
+            FC_ASSERT( !"invalid symbol" );
+      }
+   });
+}
+
+
+void database::adjust_supply( const asset& delta )
+{
+   const auto& props = get_dynamic_global_properties();
+
+   modify( props, [&]( dynamic_global_property_object& props )
+   {
+      switch( delta.symbol )
+      {
+         case PIA_SYMBOL:
+         {
+            props.current_supply += delta;
+            props.virtual_supply += delta;
+            assert( props.current_supply.amount.value >= 0 );
+            break;
+         }
+         case SNAC_SYMBOL:
+         {        
+            props.current_snac_supply += delta;
+            props.virtual_supply = props.current_supply + to_pia(props.current_snac_supply);
+            assert( props.current_snac_supply.amount.value >= 0 );
+            break;
+         }
+         default:
+            FC_ASSERT( false, "invalid symbol" );
+      }
+   } );
+}
+
+void database::adjust_printed_supply( const asset& delta )
+{
+   const auto& props = get_dynamic_global_properties();
+
+   modify( props, [&]( dynamic_global_property_object& props )
+   {
+      switch( delta.symbol )
+      {
+         case PIA_SYMBOL:
+         {
+            props.printed_supply += delta;
+            break;
+         }
+      }
+   } );
+}
+
+void database::adjust_exchange_rate( const price& p )
+{
+   const auto& props = get_dynamic_global_properties();
+
+   modify( props, [&]( dynamic_global_property_object& props )
+   {
+      props.snac_exchange_rate = p;
+   } );
+}
 
 asset database::get_balance( const account_object& a, asset_symbol_type symbol )const
 {
    switch( symbol )
    {
-      case FUTUREPIA_SYMBOL:
+      case PIA_SYMBOL:
          return a.balance;
-      case FPCH_SYMBOL:
-         return a.fpch_balance;
+      case SNAC_SYMBOL:
+         return a.snac_balance;
       default:
          FC_ASSERT( false, "invalid symbol" );
    }
@@ -2632,10 +2381,23 @@ asset database::get_savings_balance( const account_object& a, asset_symbol_type 
 {
    switch( symbol )
    {
-      case FUTUREPIA_SYMBOL:
+      case PIA_SYMBOL:
          return a.savings_balance;
-      case FPCH_SYMBOL:
-         return a.savings_fpch_balance;
+      case SNAC_SYMBOL:
+         return a.savings_snac_balance;
+      default:
+         FC_ASSERT( !"invalid symbol" );
+   }
+}
+
+asset database::get_exchange_balance( const account_object& a, asset_symbol_type symbol )const
+{
+   switch( symbol )
+   {
+      case PIA_SYMBOL:
+         return a.exchange_balance;
+      case SNAC_SYMBOL:
+         return a.exchange_snac_balance;
       default:
          FC_ASSERT( !"invalid symbol" );
    }
@@ -2645,10 +2407,11 @@ void database::init_hardforks()
 {
    _hardfork_times[ 0 ] = fc::time_point_sec( FUTUREPIA_GENESIS_TIME );
    _hardfork_versions[ 0 ] = hardfork_version( 0, 0 );
+   
    FC_ASSERT( FUTUREPIA_HARDFORK_0_1 == 1, "Invalid hardfork configuration : 0.1" );
    _hardfork_times[ FUTUREPIA_HARDFORK_0_1 ] = fc::time_point_sec( FUTUREPIA_HARDFORK_0_1_TIME );
    _hardfork_versions[ FUTUREPIA_HARDFORK_0_1 ] = FUTUREPIA_HARDFORK_0_1_VERSION;
-
+   
    FC_ASSERT( FUTUREPIA_HARDFORK_0_2 == 2, "Invalid hardfork configuration : 0.2" );
    _hardfork_times[ FUTUREPIA_HARDFORK_0_2 ] = fc::time_point_sec( FUTUREPIA_HARDFORK_0_2_TIME );
    _hardfork_versions[ FUTUREPIA_HARDFORK_0_2 ] = FUTUREPIA_HARDFORK_0_2_VERSION;
@@ -2669,7 +2432,7 @@ void database::process_hardforks()
       if( has_hardfork( FUTUREPIA_HARDFORK_0_1 ) )
       {
          while( _hardfork_versions[ hardforks.last_hardfork ] < hardforks.next_hardfork
-            && hardforks.next_hardfork_time <= head_block_time() )
+            && hardforks.next_hardfork_time <= head_block_time() )    // next_hardfork_time is decided by vote of bp
          {
             if( hardforks.last_hardfork < FUTUREPIA_NUM_HARDFORKS ) {
                apply_hardfork( hardforks.last_hardfork + 1 );
@@ -2682,7 +2445,7 @@ void database::process_hardforks()
       {
          while( hardforks.last_hardfork < FUTUREPIA_NUM_HARDFORKS
                && _hardfork_times[ hardforks.last_hardfork + 1 ] <= head_block_time()
-               /*&& hardforks.last_hardfork < FUTUREPIA_HARDFORK_0_5__54*/ )
+               && hardforks.last_hardfork < FUTUREPIA_HARDFORK_0_1 )
          {
             apply_hardfork( hardforks.last_hardfork + 1 );
          }
@@ -2726,78 +2489,65 @@ void database::apply_hardfork( uint32_t hardfork )
    switch( hardfork )
    {
       case FUTUREPIA_HARDFORK_0_1:
-         perform_vesting_share_split( 1000000 );
-#ifdef IS_TEST_NET
-         {
-            custom_operation test_op;
-            string op_msg = "Testnet: Hardfork applied";
-            test_op.data = vector< char >( op_msg.begin(), op_msg.end() );
-            test_op.required_auths.insert( FUTUREPIA_INIT_MINER_NAME );
-            operation op = test_op;   // we need the operation object to live to the end of this scope
-            operation_notification note( op );
-            notify_pre_apply_operation( note );
-            notify_post_apply_operation( note );
-         }
-#endif
          {
             static_assert(
                FUTUREPIA_MAX_VOTED_BOBSERVERS_HF0 + FUTUREPIA_MAX_MINER_BOBSERVERS_HF0 + FUTUREPIA_MAX_RUNNER_BOBSERVERS_HF0 == FUTUREPIA_MAX_BOBSERVERS,
                "HF0 bobserver counts must add up to FUTUREPIA_MAX_BOBSERVERS" );
 
-            const auto& gpo = get_dynamic_global_properties();
-
-            auto post_rf = create< reward_fund_object >( [&]( reward_fund_object& rfo )
+            auto deposit_rf = create< common_fund_object >( [&]( common_fund_object& cfo )
             {
-               rfo.name = FUTUREPIA_POST_REWARD_FUND_NAME;
-               rfo.last_update = head_block_time();
-               rfo.content_constant = FUTUREPIA_CONTENT_CONSTANT_HF0;
-               rfo.percent_curation_rewards = FUTUREPIA_1_PERCENT * 25;
-               rfo.percent_content_rewards = FUTUREPIA_100_PERCENT;
-               rfo.reward_balance = gpo.total_reward_fund_futurepia;
-#ifndef IS_TEST_NET
-               rfo.recent_claims = FUTUREPIA_HF_1_RECENT_CLAIMS;
-#endif
-               rfo.author_reward_curve = curve_id::quadratic;
-               rfo.curation_reward_curve = curve_id::quadratic_curation;
+               cfo.name = FUTUREPIA_DEPOSIT_FUND_NAME;
+               cfo.last_update = head_block_time();
+               cfo.fund_balance = asset(0,PIA_SYMBOL);
+               cfo.fund_withdraw_ready = asset(0,PIA_SYMBOL);
+               for (int i = 0 ; i < FUTUREPIA_MAX_USER_TYPE ; i++) {
+                  for (int j = 0 ; j < FUTUREPIA_MAX_STAKING_MONTH ; j++) {
+                     cfo.percent_interest[i][j] = -1.0;
+                  }
+               }
             });
-
-            // As a shortcut in payout processing, we use the id as an array index.
-            // The IDs must be assigned this way. The assertion is a dummy check to ensure this happens.
-            FC_ASSERT( post_rf.id._id == 0 );
-
-            modify( gpo, [&]( dynamic_global_property_object& g )
-            {
-               g.total_reward_fund_futurepia = asset( 0, FUTUREPIA_SYMBOL );
-               g.total_reward_shares2 = 0;
-            });
-         }
-        
-         {
-            modify( get_dynamic_global_properties(), [&]( dynamic_global_property_object& gpo )
-            {
-               gpo.vote_power_reserve_rate = 10;
-            });
-
-            modify( get< reward_fund_object, by_name >( FUTUREPIA_POST_REWARD_FUND_NAME ), [&]( reward_fund_object &rfo )
-            {
-#ifndef IS_TEST_NET
-               rfo.recent_claims = FUTUREPIA_HF_1_RECENT_CLAIMS;
-#endif
-               rfo.author_reward_curve = curve_id::linear;
-               rfo.curation_reward_curve = curve_id::square_root;
-            });
-
-            // Remove all 0 delegation objects 
+            FC_ASSERT( deposit_rf.id._id == 0 );
          }
          break;
 
       case FUTUREPIA_HARDFORK_0_2:
-         retally_asset_precision();
+         {
+            modify( get< common_fund_object >(), [&]( common_fund_object& cfo ) {
+               for (int i = 0 ; i < FUTUREPIA_MAX_USER_TYPE ; i++) {
+                  for (int j = 0 ; j < FUTUREPIA_MAX_STAKING_MONTH ; j++) {
+                     cfo.percent_interest[i][j] = 0.0;
+                  }
+               }
+               cfo.last_update = head_block_time();
+            });
+
+            const auto& bp_idx = get_index< bobserver_index >().indices().get< by_is_bp >();  
+            for( auto itr = bp_idx.begin(); itr != bp_idx.end(); itr++ ) {  
+               if (itr->is_bproducer) {
+                  modify( *itr, [&]( bobserver_object& o ) { 
+                     o.bp_owner = o.account;
+                  });
+               }
+            }
+
+            modify( get< bobserver_schedule_object >(), [&]( bobserver_schedule_object& bso ) {
+               bso.hardfork_required_bobservers = FUTUREPIA_HARDFORK_REQUIRED_BOBSERVERS_HF2;
+            });
+
+            auto dapp_reward_fund = create< dapp_reward_fund_object>( [&]( dapp_reward_fund_object& object ) {
+               object.fund_balance = asset( 0, SNAC_SYMBOL );
+               object.last_update = head_block_time();
+            });
+
+            FC_ASSERT( dapp_reward_fund.id._id == 0 );
+         }
          break;
-      
+
       default:
          break;
    }
+
+   notify_on_apply_hardfork( hardfork );
 
    modify( get_hardfork_property_object(), [&]( hardfork_property_object& hfp )
    {
@@ -2812,232 +2562,35 @@ void database::apply_hardfork( uint32_t hardfork )
    push_virtual_operation( hardfork_operation( hardfork ), true );
 }
 
-void database::retally_asset_precision() 
-{
-   ilog("retally_asset_precision");
-   asset futurepia_asset = asset(0, FUTUREPIA_SYMBOL);
-
-   const auto& account_idx = get_index <account_index>().indices();
-   for(auto itr = account_idx.begin(); itr != account_idx.end(); ++itr) 
-   {
-      modify(*itr, [](account_object &account) 
-      {
-         account.balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         account.savings_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         account.fpch_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         account.savings_fpch_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         account.reward_fpch_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         account.reward_futurepia_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   const auto& convert_request_idx = get_index <convert_request_index>().indices();
-   for( auto itr = convert_request_idx.begin(); itr != convert_request_idx.end(); ++itr )
-   {
-      modify(*itr, [=](convert_request_object &convert_request) 
-      {
-         if (convert_request.amount.symbol_name() == futurepia_asset.symbol_name())
-            convert_request.amount.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         else
-            convert_request.amount.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   const auto& escrow_idx = get_index <escrow_index>().indices();
-   for( auto itr = escrow_idx.begin(); itr != escrow_idx.end(); ++itr )
-   {
-      modify(*itr, [=](escrow_object &escrow) 
-      {
-         if (escrow.fpch_balance.symbol_name() == futurepia_asset.symbol_name())
-            escrow.fpch_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         else
-            escrow.fpch_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-
-         if (escrow.futurepia_balance.symbol_name() == futurepia_asset.symbol_name())
-            escrow.futurepia_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         else
-            escrow.futurepia_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-
-         if (escrow.pending_fee.symbol_name() == futurepia_asset.symbol_name())
-            escrow.pending_fee.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         else
-            escrow.pending_fee.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   const auto& savings_withdraw_idx = get_index <savings_withdraw_index>().indices();
-   for( auto itr = savings_withdraw_idx.begin(); itr != savings_withdraw_idx.end(); ++itr )
-   {
-      modify(*itr, [=](savings_withdraw_object &withdraw) 
-      {
-         if (withdraw.amount.symbol_name() == futurepia_asset.symbol_name())
-            withdraw.amount.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         else
-            withdraw.amount.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   const auto& reward_fund_idx = get_index <reward_fund_index>().indices();
-   for(auto itr = reward_fund_idx.begin(); itr != reward_fund_idx.end(); ++itr)
-   {
-      modify(*itr, [=](reward_fund_object &reward_fund) 
-      {
-         if (reward_fund.reward_balance.symbol_name() == futurepia_asset.symbol_name())
-            reward_fund.reward_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         else
-            reward_fund.reward_balance.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   const auto& global_property_idx = get_index <dynamic_global_property_index>().indices();
-   for(auto itr = global_property_idx.begin(); itr != global_property_idx.end(); ++itr) 
-   {
-      modify(*itr, [](dynamic_global_property_object &property) 
-      {
-         property.virtual_supply.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         property.current_supply.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         property.confidential_supply.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         property.current_fpch_supply.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         property.confidential_fpch_supply.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-         property.total_reward_fund_futurepia.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   const auto &bobserver_idx = get_index<bobserver_index>().indices();
-   for (auto itr = bobserver_idx.begin(); itr != bobserver_idx.end(); ++itr)
-   {
-      modify(*itr, [](bobserver_object &bobserver) 
-      {
-         bobserver.props.account_creation_fee.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   const auto &bobserver_schedule_idx = get_index<bobserver_schedule_index>().indices();
-   for (auto itr = bobserver_schedule_idx.begin(); itr != bobserver_schedule_idx.end(); ++itr)
-   {
-      modify(*itr, [](bobserver_schedule_object &bobserver_schedule) 
-      {
-         bobserver_schedule.median_props.account_creation_fee.change_fraction_size(FUTUREPIA_BLOCKCHAIN_PRECISION_DIGITS);
-      });
-   }
-
-   /*
-   const auto& tag_stats_idx = get_index <tag_stats_index>().indices();
-   for(auto itr = tag_stats_idx.begin(); itr != tag_stats_idx.end(); ++itr) 
-   {
-      modify(*itr, [](tag_stats_object &tag_stats) 
-      {
-         tag_stats.total_payout = asset(tag_stats.total_payout.amount, FPCH_SYMBOL);
-         // tag_stats.total_payout.set_decimals(FPCH_SYMBOL);
-      });
-   }
-
-   const auto& author_tag_stats_idx = get_index <author_tag_stats_index>().indices();
-   for(auto itr = author_tag_stats_idx.begin(); itr != author_tag_stats_idx.end(); ++itr) 
-   {
-      modify(*itr, [](author_tag_stats_object &suthor_tag_stats) 
-      {
-         suthor_tag_stats.total_rewards = asset(suthor_tag_stats.total_rewards.amount, FPCH_SYMBOL);
-         // suthor_tag_stats.total_rewards.set_decimals(FPCH_SYMBOL);
-      });
-   }
-   */
-}
-
-void database::retally_liquidity_weight() {
-   const auto& ridx = get_index< liquidity_reward_balance_index >().indices().get< by_owner >();
-   for( const auto& i : ridx ) {
-      modify( i, []( liquidity_reward_balance_object& o ){
-         o.update_weight(true/*HAS HARDFORK10 if this method is called*/);
-      });
-   }
-}
-
 std::map<asset_symbol_type, asset> database::get_total_supply() const
 {
    const auto& account_idx = get_index<account_index>().indices().get<by_name>();
-      asset total_supply = asset(0, FUTUREPIA_SYMBOL);
-      asset total_fpch = asset(0, FPCH_SYMBOL);
+   asset total_supply = asset(0, PIA_SYMBOL);
+   asset total_snac = asset(0, SNAC_SYMBOL);
 
-      auto gpo = get_dynamic_global_properties();
+   for( auto itr = account_idx.begin(); itr != account_idx.end(); ++itr )
+   {
+      total_supply += itr->balance;
+      total_supply += itr->savings_balance;
+      total_supply += itr->exchange_balance;
+      total_snac += itr->snac_balance;
+      total_snac += itr->savings_snac_balance;
+      total_snac += itr->exchange_snac_balance;
+   }
 
-      for( auto itr = account_idx.begin(); itr != account_idx.end(); ++itr )
-      {
-         total_supply += itr->balance;
-         total_supply += itr->savings_balance;
-         total_supply += itr->reward_futurepia_balance;
-         total_fpch += itr->fpch_balance;
-         total_fpch += itr->savings_fpch_balance;
-         total_fpch += itr->reward_fpch_balance;
-      }
+   const auto& fund_idx = get_index< common_fund_index, by_id >();
 
-      const auto& convert_request_idx = get_index< convert_request_index >().indices();
+   for( auto itr = fund_idx.begin(); itr != fund_idx.end(); ++itr )
+   {
+      total_supply += itr->fund_balance;
+   }
 
-      for( auto itr = convert_request_idx.begin(); itr != convert_request_idx.end(); ++itr )
-      {
-         if( itr->amount.symbol == FUTUREPIA_SYMBOL )
-            total_supply += itr->amount;
-         else if( itr->amount.symbol == FPCH_SYMBOL )
-            total_fpch += itr->amount;
-         else
-            FC_ASSERT( false, "Encountered illegal symbol in convert_request_object" );
-      }
-
-      const auto& limit_order_idx = get_index< limit_order_index >().indices();
-
-      for( auto itr = limit_order_idx.begin(); itr != limit_order_idx.end(); ++itr )
-      {
-         if( itr->sell_price.base.symbol == FUTUREPIA_SYMBOL )
-         {
-            total_supply += asset( itr->for_sale, FUTUREPIA_SYMBOL );
-         }
-         else if ( itr->sell_price.base.symbol == FPCH_SYMBOL )
-         {
-            total_fpch += asset( itr->for_sale, FPCH_SYMBOL );
-         }
-      }
-
-      const auto& escrow_idx = get_index< escrow_index >().indices().get< by_id >();
-
-      for( auto itr = escrow_idx.begin(); itr != escrow_idx.end(); ++itr )
-      {
-         total_supply += itr->futurepia_balance;
-         total_fpch += itr->fpch_balance;
-
-         if( itr->pending_fee.symbol == FUTUREPIA_SYMBOL )
-            total_supply += itr->pending_fee;
-         else if( itr->pending_fee.symbol == FPCH_SYMBOL )
-            total_fpch += itr->pending_fee;
-         else
-            FC_ASSERT( false, "found escrow pending fee that is not FPCH or FPC" );
-      }
-
-      const auto& savings_withdraw_idx = get_index< savings_withdraw_index >().indices().get< by_id >();
-
-      for( auto itr = savings_withdraw_idx.begin(); itr != savings_withdraw_idx.end(); ++itr )
-      {
-         if( itr->amount.symbol == FUTUREPIA_SYMBOL )
-            total_supply += itr->amount;
-         else if( itr->amount.symbol == FPCH_SYMBOL )
-            total_fpch += itr->amount;
-         else
-            FC_ASSERT( false, "found savings withdraw that is not FPCH or FPC" );
-      }
-      fc::uint128_t total_rshares2;
-
-      const auto& reward_idx = get_index< reward_fund_index, by_id >();
-
-      for( auto itr = reward_idx.begin(); itr != reward_idx.end(); ++itr )
-      {
-         total_supply += itr->reward_balance;
-      }
-
-      std::map<asset_symbol_type, asset> result;
+   std::map<asset_symbol_type, asset> result;
       
-      result[ total_supply.symbol ] = total_supply;
-      result[ total_fpch.symbol ] = total_fpch;
+   result[ total_supply.symbol ] = total_supply;
+   result[ total_snac.symbol ] = total_snac;
 
-      return result;
+   return result;
 }
 
 /**
@@ -3045,41 +2598,26 @@ std::map<asset_symbol_type, asset> database::get_total_supply() const
  */
 void database::validate_invariants()const
 {
-   try
-   {
-      const auto supply_list = get_total_supply();
+   const auto supply_list = get_total_supply();
 
-      asset total_supply = supply_list.find( FUTUREPIA_SYMBOL )->second;
-      asset total_fpch = supply_list.find( FPCH_SYMBOL )->second;
+   asset total_supply = supply_list.find( PIA_SYMBOL )->second;
+   asset total_snac = supply_list.find( SNAC_SYMBOL )->second;
 
-      auto gpo = get_dynamic_global_properties();
-      
+   auto gpo = get_dynamic_global_properties();    
 
-      FC_ASSERT( gpo.current_supply == total_supply, "", ("gpo.current_supply",gpo.current_supply)("total_supply",total_supply) );
-      FC_ASSERT( gpo.current_fpch_supply == total_fpch, "", ("gpo.current_fpch_supply",gpo.current_fpch_supply)("total_fpch",total_fpch) );
-
-      FC_ASSERT( gpo.virtual_supply >= gpo.current_supply );
-      if ( !get_feed_history().current_median_history.is_null() )
-      {
-         FC_ASSERT( gpo.current_fpch_supply * get_feed_history().current_median_history + gpo.current_supply
-            == gpo.virtual_supply, "", ("gpo.current_fpch_supply",gpo.current_fpch_supply)("get_feed_history().current_median_history",get_feed_history().current_median_history)("gpo.current_supply",gpo.current_supply)("gpo.virtual_supply",gpo.virtual_supply) );
-      }
-   }
-   FC_CAPTURE_LOG_AND_RETHROW( (head_block_num()) );
+   FC_ASSERT( gpo.current_supply == total_supply, "", ("gpo.current_supply",gpo.current_supply)("total_supply",total_supply) );
+   FC_ASSERT( gpo.current_snac_supply == total_snac, "", ("gpo.current_snac_supply",gpo.current_snac_supply)("total_snac",total_snac) );
+   FC_ASSERT( gpo.virtual_supply >= gpo.current_supply );
 }
 
-void database::perform_vesting_share_split( uint32_t magnitude )
+const common_fund_object& database::get_common_fund( const string name ) const
 {
-   try
-   {
-      modify( get_dynamic_global_properties(), [&]( dynamic_global_property_object& d )
-      {
-         d.total_reward_shares2 = 0;
-      } );
-
-   }
-   FC_CAPTURE_AND_RETHROW()
+   return get< common_fund_object, by_name >( name );
 }
 
+const dapp_reward_fund_object& database::get_dapp_reward_fund()const
+{
+   return get(dapp_reward_fund_id_type());
+}
 
 } } //futurepia::chain

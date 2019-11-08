@@ -173,12 +173,10 @@ namespace futurepia { namespace app {
    struct futurepia_version_info
    {
       futurepia_version_info() {}
-      futurepia_version_info( fc::string bc_v, fc::string s_v, fc::string fc_v )
-         :blockchain_version( bc_v ), futurepia_revision( s_v ), fc_revision( fc_v ) {}
+      futurepia_version_info( fc::string bc_v )
+         :blockchain_version( bc_v ) {}
 
       fc::string blockchain_version;
-      fc::string futurepia_revision;
-      fc::string fc_revision;
    };
 
    /**
@@ -218,7 +216,7 @@ namespace futurepia { namespace app {
 
 FC_REFLECT( futurepia::app::network_broadcast_api::transaction_confirmation,
         (id)(block_num)(trx_num)(expired) )
-FC_REFLECT( futurepia::app::futurepia_version_info, (blockchain_version)(futurepia_revision)(fc_revision) )
+FC_REFLECT( futurepia::app::futurepia_version_info, (blockchain_version) )
 //FC_REFLECT_TYPENAME( fc::ecc::compact_signature );
 //FC_REFLECT_TYPENAME( fc::ecc::commitment_type );
 

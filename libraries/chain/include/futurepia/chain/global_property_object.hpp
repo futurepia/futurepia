@@ -37,32 +37,14 @@ namespace futurepia { namespace chain {
          time_point_sec    time;
          account_name_type current_bobserver;
 
+         asset             printed_supply            = asset( FUTUREPIA_INIT_SUPPLY, PIA_SYMBOL );
+         asset             virtual_supply              = asset( 0, PIA_SYMBOL );   /// total supply after converting snac to pia
+         asset             current_supply              = asset( 0, PIA_SYMBOL );   /// total pia supply
+         asset             current_snac_supply         = asset( 0, SNAC_SYMBOL );  /// total snac supply
+         asset             total_exchange_request_pia  = asset( 0, PIA_SYMBOL );   /// total balance in reward fund 
+         asset             total_exchange_request_snac = asset( 0, SNAC_SYMBOL );   /// total balance in reward fund 
 
-         /**
-          *  The total POW accumulated, aka the sum of num_pow_bobserver at the time new POW is added
-          */
-         uint64_t total_pow = -1;
-
-         /**
-          * The current count of how many pending POW bobservers there are, determines the difficulty
-          * of doing pow
-          */
-         uint32_t num_pow_bobservers = 0;
-
-         asset       virtual_supply             = asset( 0, FUTUREPIA_SYMBOL );
-         asset       current_supply             = asset( 0, FUTUREPIA_SYMBOL );
-         asset       confidential_supply        = asset( 0, FUTUREPIA_SYMBOL ); ///< total asset held in confidential balances
-         asset       current_fpch_supply         = asset( 0, FPCH_SYMBOL );
-         asset       confidential_fpch_supply    = asset( 0, FPCH_SYMBOL ); ///< total asset held in confidential balances
-         asset       total_reward_fund_futurepia    = asset( 0, FUTUREPIA_SYMBOL );
-         fc::uint128 total_reward_shares2; ///< the running total of REWARD^2
-
-         /**
-          *  This property defines the interest rate that FPCH deposits receive.
-          */
-         uint16_t fpch_interest_rate = 0;
-
-         uint16_t fpch_print_rate = FUTUREPIA_100_PERCENT;
+         price             snac_exchange_rate          = price( asset( 10000, SNAC_SYMBOL ), asset( 100000000, PIA_SYMBOL ) );
 
          /**
           *  Maximum block size is decided by the set of active bobservers which change every round.
@@ -72,29 +54,34 @@ namespace futurepia { namespace chain {
           *  @note the minimum value for maximum_block_size is defined by the protocol to prevent the
           *  network from getting stuck by bobservers attempting to set this too low.
           */
-         uint32_t     maximum_block_size = 0;
+         uint32_t          maximum_block_size = 0;
 
          /**
           * The current absolute slot number.  Equal to the total
           * number of slots since genesis.  Also equal to the total
           * number of missed slots plus head_block_number.
           */
-         uint64_t      current_aslot = 0;
+         uint64_t          current_aslot = 0;
 
          /**
           * used to compute bobserver participation.
           */
-         fc::uint128_t recent_slots_filled;
-         uint8_t       participation_count = 0; ///< Divide by 128 to compute participation percentage
-
-         uint32_t last_irreversible_block_num = 0;
+         fc::uint128_t     recent_slots_filled;
+         uint8_t           participation_count = 0; ///< Divide by 128 to compute participation percentage
 
          /**
-          * The number of votes regenerated per day.  Any user voting slower than this rate will be
-          * "wasting" voting power through spillover; any user voting faster than this rate will have
-          * their votes reduced.
-          */
-         uint32_t vote_power_reserve_rate = 40;
+          * dapp transaction fee
+          * */
+         asset             dapp_transaction_fee = FUTUREPIA_DAPP_TRANSACTION_FEE;
+
+         uint32_t          last_irreversible_block_num = 0;
+         uint32_t          current_bproducer_count = 0;
+         time_point_sec    last_update_bproducer_time;
+
+         /**
+          * last time that aggregate voting for dapp
+          * */
+         time_point_sec    last_dapp_voting_aggregation_time;
    };
 
    typedef multi_index_container<
@@ -114,22 +101,21 @@ FC_REFLECT( futurepia::chain::dynamic_global_property_object,
              (head_block_id)
              (time)
              (current_bobserver)
-             (total_pow)
-             (num_pow_bobservers)
+             (printed_supply)
              (virtual_supply)
              (current_supply)
-             (confidential_supply)
-             (current_fpch_supply)
-             (confidential_fpch_supply)
-             (total_reward_fund_futurepia)
-             (total_reward_shares2)
-             (fpch_interest_rate)
-             (fpch_print_rate)
+             (current_snac_supply)
+             (total_exchange_request_pia)
+             (total_exchange_request_snac)
+             (snac_exchange_rate)
              (maximum_block_size)
              (current_aslot)
              (recent_slots_filled)
              (participation_count)
+             (dapp_transaction_fee)
              (last_irreversible_block_num)
-             (vote_power_reserve_rate)
+             (current_bproducer_count)
+             (last_update_bproducer_time)
+             (last_dapp_voting_aggregation_time)
           )
 CHAINBASE_SET_INDEX_TYPE( futurepia::chain::dynamic_global_property_object, futurepia::chain::dynamic_global_property_index )

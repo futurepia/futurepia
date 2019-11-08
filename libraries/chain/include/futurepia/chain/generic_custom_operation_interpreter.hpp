@@ -67,20 +67,23 @@ class generic_custom_operation_interpreter
       {
          try
          {
-            fc::variant v = fc::json::from_string( outer_o.json );
-
             std::vector< CustomOperationType > custom_operations;
-            if( v.is_array() && v.size() > 0 && v.get_array()[0].is_array() )
-            {
-               // it looks like a list
-               from_variant( v, custom_operations );
-            }
-            else
-            {
-               custom_operations.emplace_back();
-               from_variant( v, custom_operations[0] );
-            }
+            
+            get_inner_operation( outer_o, custom_operations );
+            apply_operations( custom_operations, operation( outer_o ) );
+         } FC_CAPTURE_AND_RETHROW( (outer_o) )
+      }
 
+      virtual void apply( const protocol::custom_json_hf2_operation& outer_o ) override
+      {
+         try
+         {
+            if( !this->_db.has_hardfork( FUTUREPIA_HARDFORK_0_2 ) ){
+               FC_ASSERT( false, "custom_json_hf2_operation do not use in version 0.1.0." );
+            }
+            std::vector< CustomOperationType > custom_operations;
+            
+            get_inner_operation( outer_o, custom_operations );
             apply_operations( custom_operations, operation( outer_o ) );
          } FC_CAPTURE_AND_RETHROW( (outer_o) )
       }
@@ -89,17 +92,9 @@ class generic_custom_operation_interpreter
       {
          try
          {
-            vector< CustomOperationType > custom_operations;
+            std::vector< CustomOperationType > custom_operations;
 
-            try
-            {
-               custom_operations = fc::raw::unpack< vector< CustomOperationType > >( outer_o.data );
-            }
-            catch ( fc::exception& )
-            {
-               custom_operations.push_back( fc::raw::unpack< CustomOperationType >( outer_o.data ) );
-            }
-
+            get_inner_operation( outer_o, custom_operations );
             apply_operations( custom_operations, operation( outer_o ) );
          }
          FC_CAPTURE_AND_RETHROW( (outer_o) )
@@ -108,6 +103,55 @@ class generic_custom_operation_interpreter
       virtual std::shared_ptr< graphene::schema::abstract_schema > get_operation_schema() override
       {
          return graphene::schema::get_schema_for_type< CustomOperationType >();
+      }
+
+   private:
+      void get_inner_operation( const protocol::custom_json_operation& outer_op, std::vector< CustomOperationType >& custom_operations )
+      {
+         fc::variant v = fc::json::from_string( outer_op.json );
+
+         if( v.is_array() && v.size() > 0 && v.get_array()[0].is_array() )
+         {
+            from_variant( v, custom_operations );
+         }
+         else
+         {
+            custom_operations.emplace_back();
+            from_variant( v, custom_operations[0] );
+         }
+      }
+
+      void get_inner_operation( const protocol::custom_json_hf2_operation& outer_op, std::vector< CustomOperationType >& custom_operations )
+      {
+         fc::variant v = fc::json::from_string( outer_op.json );
+
+         if( v.is_array() && v.size() > 0 && v.get_array()[0].is_array() )
+         {
+            from_variant( v, custom_operations );
+         }
+         else
+         {
+            custom_operations.emplace_back();
+            from_variant( v, custom_operations[0] );
+         }
+      }
+
+      void get_inner_operation( const protocol::custom_binary_operation& outer_op, std::vector< CustomOperationType >& custom_operations )
+      {
+         try
+         {
+            std::vector< CustomOperationType > inner_operations = fc::raw::unpack< vector< CustomOperationType > >( outer_op.data );
+            auto itr = inner_operations.begin();
+            while( itr != inner_operations.end() )
+            {
+               custom_operations.push_back( *itr );
+               itr++;
+            }
+         }
+         catch ( fc::exception& )
+         {
+            custom_operations.push_back( fc::raw::unpack< CustomOperationType >( outer_op.data ) );
+         }
       }
 };
 

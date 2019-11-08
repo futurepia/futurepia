@@ -1,6 +1,7 @@
 #include <futurepia/bobserver/bobserver_operations.hpp>
 #include <futurepia/bobserver/bobserver_objects.hpp>
 
+#include <futurepia/chain/comment_object.hpp>
 
 namespace futurepia { namespace bobserver {
 

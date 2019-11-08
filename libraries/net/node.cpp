@@ -80,8 +80,6 @@
 
 #include <futurepia/protocol/config.hpp>
 
-#include <fc/git_revision.hpp>
-
 //#define ENABLE_DEBUG_ULOGS
 
 #ifdef DEFAULT_LOGGER
@@ -296,7 +294,6 @@ namespace graphene { namespace net { namespace detail {
                                    (get_block_number) \
                                    (get_block_time) \
                                    (get_head_block_id) \
-                                   (estimate_last_known_fork_from_git_revision_timestamp) \
                                    (error_encountered)
 
 
@@ -394,7 +391,6 @@ namespace graphene { namespace net { namespace detail {
       fc::time_point_sec get_block_time(const item_hash_t& block_id) override;
       fc::time_point_sec get_blockchain_now() override;
       item_hash_t get_head_block_id() const override;
-      uint32_t estimate_last_known_fork_from_git_revision_timestamp(uint32_t unix_timestamp) const override;
       void error_encountered(const std::string& message, const fc::oexception& error) override;
     };
 
@@ -1853,8 +1849,6 @@ namespace graphene { namespace net { namespace detail {
       // settle on what we really want in there, we'll likely promote them to first
       // class fields in the hello message
       fc::mutable_variant_object user_data;
-      user_data["fc_git_revision_sha"] = fc::git_revision_sha;
-      user_data["fc_git_revision_unix_timestamp"] = fc::git_revision_unix_timestamp;
 #if defined( __APPLE__ )
       user_data["platform"] = "osx";
 #elif defined( __linux__ )
@@ -1884,14 +1878,6 @@ namespace graphene { namespace net { namespace detail {
     {
       VERIFY_CORRECT_THREAD();
       // try to parse data out of the user_agent string
-      if (user_data.contains("graphene_git_revision_sha"))
-        originating_peer->graphene_git_revision_sha = user_data["graphene_git_revision_sha"].as_string();
-      if (user_data.contains("graphene_git_revision_unix_timestamp"))
-        originating_peer->graphene_git_revision_unix_timestamp = fc::time_point_sec(user_data["graphene_git_revision_unix_timestamp"].as<uint32_t>());
-      if (user_data.contains("fc_git_revision_sha"))
-        originating_peer->fc_git_revision_sha = user_data["fc_git_revision_sha"].as_string();
-      if (user_data.contains("fc_git_revision_unix_timestamp"))
-        originating_peer->fc_git_revision_unix_timestamp = fc::time_point_sec(user_data["fc_git_revision_unix_timestamp"].as<uint32_t>());
       if (user_data.contains("platform"))
         originating_peer->platform = user_data["platform"].as_string();
       if (user_data.contains("bitness"))
@@ -1936,14 +1922,6 @@ namespace graphene { namespace net { namespace detail {
 
       parse_hello_user_data_for_peer(originating_peer, hello_message_received.user_data);
 
-      // if they didn't provide a last known fork, try to guess it
-      if (originating_peer->last_known_fork_block_number == 0 &&
-          originating_peer->graphene_git_revision_unix_timestamp)
-      {
-        uint32_t unix_timestamp = originating_peer->graphene_git_revision_unix_timestamp->sec_since_epoch();
-        originating_peer->last_known_fork_block_number = _delegate->estimate_last_known_fork_from_git_revision_timestamp(unix_timestamp);
-      }
-
       // now decide what to do with it
       if (originating_peer->their_state == peer_connection::their_connection_state::just_connected)
       {
@@ -1972,9 +1950,6 @@ namespace graphene { namespace net { namespace detail {
             uint32_t head_block_num = _delegate->get_block_number(_delegate->get_head_block_id());
             if (next_fork_block_number < head_block_num)
             {
-#ifdef ENABLE_DEBUG_ULOGS
-              ulog("Rejecting connection from peer because their version is too old.  Their version date: ${date}", ("date", originating_peer->graphene_git_revision_unix_timestamp));
-#endif
               wlog("Received hello message from peer running a version of that can only understand blocks up to #${their_hard_fork}, but I'm at head block number #${my_block_number}",
                    ("their_hard_fork", next_fork_block_number)("my_block_number", head_block_num));
               std::ostringstream rejection_message;
@@ -3153,9 +3128,6 @@ namespace graphene { namespace net { namespace detail {
                 peers_to_disconnect[peer] = std::make_pair(disconnect_reason_stream.str(),
                                                            fc::oexception(fc::exception(FC_LOG_MESSAGE(error, "You need to upgrade your client due to hard fork at block ${block_number}",
                                                                                                        ("block_number", block_message_to_send.block.block_num())))));
-#ifdef ENABLE_DEBUG_ULOGS
-                ulog("Disconnecting from peer during sync because their version is too old.  Their version date: ${date}", ("date", peer->graphene_git_revision_unix_timestamp));
-#endif
                 disconnecting_this_peer = true;
               }
             }
@@ -3516,9 +3488,6 @@ namespace graphene { namespace net { namespace detail {
                   next_fork_block_number <= block_number)
               {
                 peers_to_disconnect.insert(peer);
-#ifdef ENABLE_DEBUG_ULOGS
-                ulog("Disconnecting from peer because their version is too old.  Their version date: ${date}", ("date", peer->graphene_git_revision_unix_timestamp));
-#endif
               }
             }
           }
@@ -3643,11 +3612,7 @@ namespace graphene { namespace net { namespace detail {
            ("endpoint", originating_peer->get_remote_endpoint())
            ("block_id", block_message_to_process.block_id));
       fc::exception detailed_error(FC_LOG_MESSAGE(error, "You sent me a block that I didn't ask for, block_id: ${block_id}",
-                                                  ("block_id", block_message_to_process.block_id)
-                                                  ("graphene_git_revision_sha", originating_peer->graphene_git_revision_sha)
-                                                  ("graphene_git_revision_unix_timestamp", originating_peer->graphene_git_revision_unix_timestamp)
-                                                  ("fc_git_revision_sha", originating_peer->fc_git_revision_sha)
-                                                  ("fc_git_revision_unix_timestamp", originating_peer->fc_git_revision_unix_timestamp)));
+                                                  ("block_id", block_message_to_process.block_id) ));
       disconnect_from_peer(originating_peer, "You sent me a block that I didn't ask for", true, detailed_error);
     }
 
@@ -3879,14 +3844,6 @@ namespace graphene { namespace net { namespace detail {
         data_for_this_peer.connection_direction = peer->direction;
         data_for_this_peer.firewalled = peer->is_firewalled;
         fc::mutable_variant_object user_data;
-        if (peer->graphene_git_revision_sha)
-          user_data["graphene_git_revision_sha"] = *peer->graphene_git_revision_sha;
-        if (peer->graphene_git_revision_unix_timestamp)
-          user_data["graphene_git_revision_unix_timestamp"] = *peer->graphene_git_revision_unix_timestamp;
-        if (peer->fc_git_revision_sha)
-          user_data["fc_git_revision_sha"] = *peer->fc_git_revision_sha;
-        if (peer->fc_git_revision_unix_timestamp)
-          user_data["fc_git_revision_unix_timestamp"] = *peer->fc_git_revision_unix_timestamp;
         if (peer->platform)
           user_data["platform"] = *peer->platform;
         if (peer->bitness)
@@ -4950,29 +4907,6 @@ namespace graphene { namespace net { namespace detail {
         peer_details["banscore"] = "";
         peer_details["syncnode"] = "";
 
-        if (peer->fc_git_revision_sha)
-        {
-          std::string revision_string = *peer->fc_git_revision_sha;
-          if (*peer->fc_git_revision_sha == fc::git_revision_sha)
-            revision_string += " (same as ours)";
-          else
-            revision_string += " (different from ours)";
-          peer_details["fc_git_revision_sha"] = revision_string;
-
-        }
-        if (peer->fc_git_revision_unix_timestamp)
-        {
-          peer_details["fc_git_revision_unix_timestamp"] = *peer->fc_git_revision_unix_timestamp;
-          std::string age_string = fc::get_approximate_relative_time_string( *peer->fc_git_revision_unix_timestamp);
-          if (*peer->fc_git_revision_unix_timestamp == fc::time_point_sec(fc::git_revision_unix_timestamp))
-            age_string += " (same as ours)";
-          else if (*peer->fc_git_revision_unix_timestamp > fc::time_point_sec(fc::git_revision_unix_timestamp))
-            age_string += " (newer than ours)";
-          else
-            age_string += " (older than ours)";
-          peer_details["fc_git_revision_age"] = age_string;
-        }
-
         if (peer->platform)
           peer_details["platform"] = *peer->platform;
 
@@ -5603,11 +5537,6 @@ namespace graphene { namespace net { namespace detail {
     item_hash_t statistics_gathering_node_delegate_wrapper::get_head_block_id() const
     {
       INVOKE_AND_COLLECT_STATISTICS(get_head_block_id);
-    }
-
-    uint32_t statistics_gathering_node_delegate_wrapper::estimate_last_known_fork_from_git_revision_timestamp(uint32_t unix_timestamp) const
-    {
-      INVOKE_AND_COLLECT_STATISTICS(estimate_last_known_fork_from_git_revision_timestamp, unix_timestamp);
     }
 
     void statistics_gathering_node_delegate_wrapper::error_encountered(const std::string& message, const fc::oexception& error)

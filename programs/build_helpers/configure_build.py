@@ -75,7 +75,6 @@ def parse_arguments(src_default):
     parser.add_argument("--win", "--windows", dest="windows", action="store_true", default=argparse.SUPPRESS, help="cross compile for Windows using MinGW")
     parser.add_argument("--src", dest="source_dir", metavar="SOURCEDIR", type=convert_to_dir, default=argparse.SUPPRESS, 
                         help="Futurepia source directory (if omitted, will assume is at ../.. relative to location of this script)")
-    parser.add_argument("--test", "--testnet", dest="testnet", action="store_true", default=argparse.SUPPRESS, help="built with BUILD_FUTUREPIA_TESTNET=true")
     parser.add_argument("additional_args", metavar="CMAKEOPTS", nargs=argparse.REMAINDER, help=argparse.SUPPRESS)
     
     parser.set_defaults(low_mem_node=False, release=True, windows=False, source_dir=src_default, testnet=False)
@@ -152,7 +151,6 @@ def main(args):
     # Add Futurepia flags
     command.append("-DLOW_MEMORY_NODE=" + ("ON" if args.low_mem_node else "OFF"))
     command.append("-DCMAKE_BUILD_TYPE=" + ("RELEASE" if args.release else "DEBUG"))
-    command.append("-DBUILD_FUTUREPIA_TESTNET=" + ("true" if args.testnet else "false"))
 
     # Add source directory, root paths to search within, and any additional flags/options passed to this script
     if len(root_search_paths) > 0:

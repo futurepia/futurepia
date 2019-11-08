@@ -8,7 +8,7 @@ namespace futurepia { namespace protocol {
 
    struct asset
    {
-      asset( share_type a = 0, asset_symbol_type id = FUTUREPIA_SYMBOL )
+      asset( share_type a = 0, asset_symbol_type id = PIA_SYMBOL )
       :amount(a),symbol(id){}
 
       share_type        amount;

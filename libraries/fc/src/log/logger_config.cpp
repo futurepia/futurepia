@@ -35,6 +35,10 @@ namespace fc {
       for( size_t i = 0; i < cfg.loggers.size(); ++i ) {
          auto lgr = logger::get( cfg.loggers[i].name );
 
+         // TODO: finish configure logger here...
+         if( cfg.loggers[i].parent.valid() ) {
+            lgr.set_parent( logger::get( *cfg.loggers[i].parent ) );
+         }
          lgr.set_name(cfg.loggers[i].name);
          if( cfg.loggers[i].level.valid() ) lgr.set_log_level( *cfg.loggers[i].level );
          

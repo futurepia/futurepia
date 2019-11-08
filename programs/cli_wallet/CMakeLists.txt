@@ -14,19 +14,19 @@ if( FUTUREPIA_STATIC_BUILD )
    target_link_libraries( cli_wallet PRIVATE
                           "-static-libstdc++ -static-libgcc -lreadline"
                           futurepia_app graphene_net futurepia_chain futurepia_protocol graphene_utilities 
-                          futurepia_wallet futurepia_private_message futurepia_app futurepia_token fc 
-                          ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
+                          futurepia_wallet futurepia_private_message futurepia_app futurepia_token 
+                          futurepia_dapp futurepia_dapp_history fc ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
 elseif( FULL_STATIC_BUILD )
 target_link_libraries( cli_wallet PRIVATE
                           "-static-libstdc++ -static-libgcc -lreadline -Wl,-Bstatic -lstdc++ -lwinpthread -Wl,-Bdynamic"
                           futurepia_app graphene_net futurepia_chain futurepia_protocol graphene_utilities 
-                          futurepia_wallet futurepia_private_message futurepia_app futurepia_token fc 
-                          ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
+                          futurepia_wallet futurepia_private_message futurepia_app futurepia_token 
+                          futurepia_dapp futurepia_dapp_history fc ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
 else( FUTUREPIA_STATIC_BUILD )
    target_link_libraries( cli_wallet PRIVATE
                           futurepia_app graphene_net futurepia_chain futurepia_protocol graphene_utilities 
-                          futurepia_wallet futurepia_private_message futurepia_app futurepia_token fc 
-                          ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
+                          futurepia_wallet futurepia_private_message futurepia_app futurepia_token 
+                          futurepia_dapp futurepia_dapp_history fc ${CMAKE_DL_LIBS} ${PLATFORM_SPECIFIC_LIBS} )
 endif( FUTUREPIA_STATIC_BUILD )
 
 if(MSVC)

@@ -1,5 +1,5 @@
 
-#include <fstream>
+
 #include <sstream>
 
 #include <fc/filesystem.hpp>
@@ -29,7 +29,7 @@ namespace fc {
 
    void ofstream::open( const fc::path& file, int m ) {
      const boost::filesystem::path& bfp = file; 
-     my->ofs.open( bfp, std::ios::binary );
+     my->ofs.open( bfp, std::ios::binary | static_cast<std::ios_base::openmode>( m ) );
    }
    size_t ofstream::writesome( const char* buf, size_t len ) {
         my->ofs.write(buf,len);

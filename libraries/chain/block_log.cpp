@@ -43,7 +43,7 @@ namespace futurepia { namespace chain {
                      block_stream.open( block_file.generic_string().c_str(), LOG_WRITE );
                      block_write = true;
 #ifdef WIN32
-		 block_stream.seekp(0, std::ios::end);
+					 block_stream.seekp(0, std::ios::end);
 #endif
                   }
                }
@@ -74,7 +74,7 @@ namespace futurepia { namespace chain {
                      index_stream.open( index_file.generic_string().c_str(), LOG_WRITE );
                      index_write = true;
 #ifdef WIN32
-		 index_stream.seekp(0, std::ios::end);
+                     index_stream.seekp(0, std::ios::end);
 #endif
                   }
                }
