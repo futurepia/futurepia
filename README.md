@@ -172,7 +172,7 @@ When executing commands such as create / update etc, the active private key of B
 
 ```
       import_key [private key]
-      unlocked >>> import_key 5Jt2PbJHF9zswdhnypctCDoJ1uufApC2dX6H8JiQsKkjjCiwSAv
+      unlocked >>> import_key 5Jzx2cr27Suff1SjDh4M9qaAbLeCPKyDNUFL8cEffYBXPQBfK74
 ```
 
 ## Create an account
